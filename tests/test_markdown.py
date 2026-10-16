@@ -69,6 +69,12 @@ class TestSplitMarkdown:
         segs = split_markdown(text)
         assert len(segs) == 1 and segs[0].text == text
 
+    def test_crlf_code_block_does_not_hide_a_later_diagram(self):
+        text = "\r\n".join([FENCE + "bash", "echo hi", FENCE, FENCE + "mermaid", "graph LR", FENCE, ""])
+        segs = split_markdown(text)
+        assert [s.is_mermaid for s in segs] == [False, True, False]
+        assert segs[1].text == "graph LR"
+
     def test_backtick_in_info_string_is_not_a_fence(self):
         text = _md("```mermaid `x`", "graph LR", "```")
         assert not any(s.is_mermaid for s in split_markdown(text))
@@ -141,6 +147,22 @@ class TestCliMarkdown:
         plain = re.sub(r"\x1b\[[0-9;]*m", "", out.read_text())
         assert "intro [not markup]" in plain
         assert "   ┌" in plain
+
+    def test_piped_crlf_input(self):
+        # Unlike a file opened in text mode, piped stdin keeps CRLF endings.
+        import subprocess
+        import sys
+
+        doc = "\r\n".join(["before", FENCE + "mermaid", "graph LR", "  A --> B", FENCE, "after", ""])
+        result = subprocess.run(
+            [sys.executable, "-m", "termaid", "--markdown"],
+            input=doc.encode(),
+            capture_output=True,
+        )
+        out = result.stdout.decode()
+        assert result.returncode == 0
+        assert "┌" in out
+        assert "mermaid" not in out
 
     @pytest.mark.parametrize("flag", [["--json", "pie"], ["--tui"]])
     def test_conflicting_flags(self, tmp_path: Path, flag: list[str], capsys):

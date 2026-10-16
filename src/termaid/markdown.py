@@ -41,6 +41,12 @@ def split_markdown(text: str) -> list[Segment]:
     Other fenced blocks are kept as text and not searched, so a Mermaid
     example quoted inside a longer fence stays as it is. A Mermaid fence
     that is never closed is kept as text too.
+
+    Lines are split on ``\n`` only, so a CRLF document keeps its ``\r``
+    characters in the text segments and in ``raw``, and rejoining the
+    segments with ``\n`` gives back the input exactly. The ``\r`` is
+    dropped from the diagram source itself. Files opened in text mode
+    arrive with LF endings, but piped stdin keeps CRLF.
     """
     lines = text.split("\n")
     segments: list[Segment] = []
@@ -61,7 +67,7 @@ def split_markdown(text: str) -> list[Segment]:
             i += 1
             continue
 
-        close = re.compile(r"^[ \t]*" + re.escape(fence[0]) + "{" + str(len(fence)) + r",}[ \t]*$")
+        close = re.compile(r"^[ \t]*" + re.escape(fence[0]) + "{" + str(len(fence)) + r",}[ \t]*\r?$")
         end = next((j for j in range(i + 1, len(lines)) if close.match(lines[j])), None)
         words = match.group("info").split()
         is_mermaid = bool(words) and words[0].lower() == "mermaid"
@@ -74,7 +80,7 @@ def split_markdown(text: str) -> list[Segment]:
             continue
 
         indent = match.group("indent")
-        body = [_dedent(line, len(indent)) for line in lines[i + 1:end]]
+        body = [_dedent(line, len(indent)).rstrip("\r") for line in lines[i + 1:end]]
         flush()
         segments.append(Segment(
             "\n".join(body),
