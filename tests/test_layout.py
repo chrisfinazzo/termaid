@@ -223,3 +223,38 @@ class TestSubgraphEdgeLayers:
         )
         g = parse_flowchart(src)
         assert expand_subgraph_edges(g) == []
+
+
+class TestSiblingAlignment:
+    """Issue #14: nodes line up with their own parents, not the packed slot order."""
+
+    SOURCE = "flowchart {direction}\n  A --> B\n  A --> C\n  D --> E\n"
+
+    def _placements(self, direction: str):
+        from termaid.layout.grid import compute_layout
+        from termaid.parser.flowchart import parse_flowchart
+
+        graph = parse_flowchart(self.SOURCE.format(direction=direction))
+        layout = compute_layout(graph)
+        return {nid: p.grid for nid, p in layout.placements.items()}
+
+    def test_lr_children_sit_beside_their_parent(self):
+        g = self._placements("LR")
+        # A's children B and C are the two rows nearest A; D moves down beside E
+        assert g["B"].row < g["C"].row < g["E"].row
+        assert g["D"].row == g["E"].row
+        assert g["A"].row < g["D"].row
+
+    def test_td_children_sit_under_their_parent(self):
+        g = self._placements("TD")
+        assert g["B"].col < g["C"].col < g["E"].col
+        assert g["D"].col == g["E"].col
+        assert g["A"].col < g["D"].col
+
+    def test_fan_out_parent_is_centred_over_children(self):
+        from termaid.layout.grid import compute_layout
+        from termaid.parser.flowchart import parse_flowchart
+
+        layout = compute_layout(parse_flowchart("graph TD\n  A --> B\n  A --> C\n  A --> D\n"))
+        g = {nid: p.grid for nid, p in layout.placements.items()}
+        assert g["A"].col == g["C"].col

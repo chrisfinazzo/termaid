@@ -19,6 +19,74 @@ from .grid import (
 )
 
 
+
+def _aligned_slots(graph: Graph, layer_order: list[list[str]]) -> dict[str, int]:
+    """Pick a cross-axis slot for every node so edges run as straight as possible.
+
+    ``layer_order`` fixes the order of the nodes in each layer; this only
+    decides how far along the cross axis each one sits. A node wants the
+    mean slot of its parents in the previous layer, and a parent wants the
+    mean slot of its children, so the slots are settled by sweeping down
+    and up a few times. Within a layer slots stay strictly increasing, so
+    the order never changes and nothing overlaps.
+
+    Without this every layer is packed from slot 0, so a node whose only
+    parent is in row 2 lands in row 0 next to some unrelated node, and the
+    diagram reads as if they were connected (issue #14).
+
+    Graphs with subgraphs keep packed slots: subgraph boxes are drawn
+    around their members, and spreading members apart to line them up
+    with outside nodes makes those boxes collide.
+    """
+    slots = {nid: i for nodes in layer_order for i, nid in enumerate(nodes)}
+    if graph.subgraphs or graph.grid_positions or len(layer_order) < 2:
+        return slots
+    layer_of = {nid: li for li, nodes in enumerate(layer_order) for nid in nodes}
+    parents: dict[str, list[str]] = {nid: [] for nid in slots}
+    children: dict[str, list[str]] = {nid: [] for nid in slots}
+    for edge in graph.edges:
+        if layer_of.get(edge.target, -1) == layer_of.get(edge.source, -2) + 1:
+            parents[edge.target].append(edge.source)
+            children[edge.source].append(edge.target)
+
+    def _sweep(order: list[list[str]], neighbours: dict[str, list[str]]) -> None:
+        for nodes in order:
+            wants: list[float] = []
+            for nid in nodes:
+                anchors = [slots[n] for n in neighbours[nid]]
+                wants.append(sum(anchors) / len(anchors) if anchors else (wants[-1] + 1 if wants else 0))
+            # Place left to right, then slide each run of nodes that pushed on
+            # each other back so the run is centred on what it wanted. Without
+            # the centring a group that wants one slot lands to its right, the
+            # other layer follows it, and every sweep drifts a slot further.
+            placed: list[int] = []
+            run_start = 0
+            for i, want in enumerate(wants):
+                # Floor, not round: a parent over two children wants a half
+                # slot, and rounding it up would creep right on every sweep.
+                slot = max(int(want), placed[-1] + 1 if placed else 0)
+                if placed and slot > placed[-1] + 1:
+                    _centre(placed, wants, run_start, i)
+                    run_start = i
+                placed.append(slot)
+            _centre(placed, wants, run_start, len(placed))
+            for nid, slot in zip(nodes, placed):
+                slots[nid] = slot
+
+    def _centre(placed: list[int], wants: list[float], start: int, end: int) -> None:
+        overshoot = sum(placed[i] - wants[i] for i in range(start, end)) / (end - start)
+        floor = placed[start - 1] + 1 if start else 0
+        shift = min(int(overshoot), placed[start] - floor)
+        for i in range(start, end):
+            placed[i] -= shift
+
+    for _ in range(3):
+        _sweep(layer_order[1:], parents)
+        _sweep(layer_order[-2::-1], children)
+    lowest = min(slots.values())
+    return {nid: slot - lowest for nid, slot in slots.items()}
+
+
 def place_nodes(
     graph: Graph,
     layout: GridLayout,
@@ -33,11 +101,13 @@ def place_nodes(
     room to route crossing edges without overlap.
     """
     expansions = gap_expansions or {}
+    slots = _aligned_slots(graph, layer_order)
     cumulative_extra = 0
     for layer_idx, nodes in enumerate(layer_order):
         if layer_idx > 0:
             cumulative_extra += expansions.get(layer_idx - 1, 0)
-        for pos_idx, nid in enumerate(nodes):
+        for nid in nodes:
+            pos_idx = slots[nid]
             if direction.is_horizontal:
                 col = layer_idx * STRIDE + 1 + cumulative_extra
                 row = pos_idx * STRIDE + 1

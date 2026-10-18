@@ -5,6 +5,9 @@
 ### New
 - `--markdown`: read a Markdown document (a README, a PR description, an LLM's reply) and draw each ```` ```mermaid ```` block in place, passing the rest of the text through. Diagrams inside list items keep their indentation, mermaid examples quoted inside a longer code fence are left alone, and a block that cannot be drawn is kept as source with a warning on stderr
 
+### Fixes
+- Flowchart layout: nodes now line up with their own parents and parents are centred over their children, so a node is no longer drawn next to an unrelated node in the same rank (#14). Fan-outs are symmetric and trees spread like trees; diagrams with subgraphs keep the previous packed layout.
+
 ## 0.9.0 (2026-09-15)
 
 ### New
