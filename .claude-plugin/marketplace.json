@@ -1,0 +1,12 @@
+{
+  "name": "termaid",
+  "owner": { "name": "Fabio Souto" },
+  "description": "termaid: Mermaid diagrams drawn in the terminal, inside Claude Code",
+  "plugins": [
+    {
+      "name": "termaid",
+      "source": "./claude-plugin",
+      "description": "Draw the Mermaid diagrams in Claude's replies right in the terminal"
+    }
+  ]
+}

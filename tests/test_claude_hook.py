@@ -1,0 +1,125 @@
+"""The Claude Code MessageDisplay hook and the stream renderer behind it."""
+from __future__ import annotations
+
+import io
+import json
+
+import pytest
+
+from termaid.claude_hook import StreamRenderer, run_claude_hook
+
+
+FLOW = "```mermaid\ngraph LR\n  A[Start] --> B[End]\n```\n"
+
+
+def test_text_without_diagrams_passes_through_unchanged():
+    r = StreamRenderer(width=60)
+    assert r.feed("Hello\n\n- one\n- two\n") == "Hello\n\n- one\n- two\n"
+
+
+def test_complete_fence_in_one_batch_is_drawn_in_a_code_block():
+    out = StreamRenderer(width=60).feed("Before\n" + FLOW + "After\n")
+    assert out.startswith("Before\n```\n")
+    assert "Start" in out and "End" in out and "►" in out
+    assert "graph LR" not in out
+    assert out.endswith("```\nAfter\n")
+
+
+def test_fence_spanning_batches_is_held_then_drawn():
+    r = StreamRenderer(width=60)
+    assert r.feed("Here:\n\n```mermaid\ngraph LR\n") == "Here:\n\n"
+    assert r.fence == "```"
+    second = r.feed("  A --> B\n```\n\nDone.\n")
+    assert second.startswith("```\n") and "Done." in second
+    assert r.fence == "" and r.held == []
+
+
+def test_mid_line_batch_is_carried_until_the_line_completes():
+    r = StreamRenderer(width=60)
+    assert r.feed("```mer") == ""
+    assert r.carry == "```mer"
+    assert r.feed("maid\ngraph LR\n  A --> B\n```\n").startswith("```\n")
+
+
+def test_final_batch_ending_mid_line_keeps_no_trailing_newline():
+    r = StreamRenderer(width=60)
+    assert r.feed("last words", final=True) == "last words"
+
+
+def test_unclosed_fence_is_shown_as_written_on_final():
+    r = StreamRenderer(width=60)
+    r.feed("```mermaid\ngraph TD\n")
+    assert r.feed("  X --> Y\n", final=True) == "```mermaid\ngraph TD\n  X --> Y\n"
+    assert r.fence == ""
+
+
+def test_indented_fence_keeps_its_indentation():
+    out = StreamRenderer(width=60).feed("1. step\n\n   ```mermaid\n   graph LR\n     A --> B\n   ```\n")
+    body = out.split("\n")[2:]
+    assert body[0] == "   ```"
+    assert all(line.startswith("   ") for line in body if line)
+
+
+def test_other_code_fences_are_left_alone():
+    text = "```python\nprint('graph LR')\n```\n"
+    assert StreamRenderer(width=60).feed(text) == text
+
+
+def test_block_that_cannot_be_drawn_is_shown_as_source():
+    text = "```mermaid\nthis is not a diagram\n```\n"
+    assert StreamRenderer(width=60).feed(text) == text
+
+
+def test_state_round_trips_through_json():
+    r = StreamRenderer(width=60)
+    r.feed("```mermaid\ngraph LR\n")
+    saved = r.to_json()
+    fresh = StreamRenderer(width=60)
+    fresh.load(saved)
+    assert fresh.feed("  A --> B\n```\n").startswith("```\n")
+
+
+def _event(delta: str, *, message_id: str, index: int, final: bool) -> str:
+    return json.dumps({
+        "session_id": "s", "transcript_path": "/t", "cwd": ".",
+        "hook_event_name": "MessageDisplay", "turn_id": "t",
+        "message_id": message_id, "index": index, "final": final, "delta": delta,
+    })
+
+
+def _run(delta: str, **kw) -> str:
+    out = io.StringIO()
+    rc = run_claude_hook(io.StringIO(_event(delta, **kw)), out, width=60)
+    assert rc == 0
+    return json.loads(out.getvalue())["hookSpecificOutput"]["displayContent"]
+
+
+def test_hook_keeps_fence_state_between_calls(tmp_path, monkeypatch):
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+    mid = "11111111-2222-3333-4444-555555555555"
+    assert _run("Flow:\n```mermaid\ngraph LR\n", message_id=mid, index=0, final=False) == "Flow:\n"
+    assert (tmp_path / "termaid-claude-hook" / f"{mid}.json").exists()
+    drawn = _run("  A --> B\n```\nok\n", message_id=mid, index=1, final=False)
+    assert drawn.startswith("```\n") and drawn.endswith("ok\n")
+    assert not (tmp_path / "termaid-claude-hook" / f"{mid}.json").exists()
+    assert _run("", message_id=mid, index=2, final=True) == ""
+
+
+def test_hook_single_call_mode_draws_whole_message(tmp_path, monkeypatch):
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+    out = _run("a\n" + FLOW + "b", message_id="m", index=0, final=True)
+    assert out.startswith("a\n```\n") and out.endswith("```\nb")
+
+
+def test_hook_ignores_bad_input():
+    out = io.StringIO()
+    assert run_claude_hook(io.StringIO("not json"), out) == 0
+    assert out.getvalue() == ""
+
+
+def test_cli_flag_runs_the_hook(monkeypatch, capsys):
+    from termaid.cli import main
+
+    monkeypatch.setattr("sys.stdin", io.StringIO(_event("x\n", message_id="c", index=0, final=True)))
+    assert main(["--claude-hook"]) == 0
+    assert json.loads(capsys.readouterr().out)["hookSpecificOutput"]["displayContent"] == "x\n"

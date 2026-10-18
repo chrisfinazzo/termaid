@@ -518,6 +518,7 @@ packet
 | `--show-ids` | Show node IDs alongside labels for debugging (e.g. `myId: My Label`) |
 | `--json TYPE` | Pipe JSON/tabular data and render as `treemap`, `pie`, `mindmap`, `flowchart`, or `xychart` |
 | `--markdown` | Read a Markdown document and draw each `mermaid` code block in place; other text passes through. A block that cannot be drawn is kept as source, with a warning |
+| `--claude-hook` | Run as a Claude Code `MessageDisplay` hook: read one batch of a reply as JSON on stdin and draw its `mermaid` blocks in place (see [Claude Code](#claude-code)) |
 | `--tui` | Interactive TUI viewer (requires `pip install termaid[tui]`) |
 
 ## Python API
@@ -572,6 +573,44 @@ class MyApp(App):
 ```bash
 pip install termaid[rich]      # Colored terminal output
 pip install termaid[textual]   # Textual TUI widget
+```
+
+## Claude Code
+
+Claude draws Mermaid diagrams all the time. With the termaid plugin they show up
+in the terminal as diagrams instead of code fences, while Claude keeps seeing the
+Mermaid source. One command on Claude Code 2.1.275 or later:
+
+```
+/plugin install termaid --marketplace fasouto/termaid
+```
+
+On older versions, add the marketplace first with `/plugin marketplace add fasouto/termaid`
+and then `/plugin install termaid@termaid`. The plugin needs the `termaid` command on
+your PATH (`brew install termaid` or `uv tool install termaid`). It adds:
+
+- a `MessageDisplay` hook that runs `termaid --claude-hook` on each reply and draws its
+  mermaid blocks in place. It is display-only: the transcript is untouched, and if termaid
+  is missing or fails, the original text is shown.
+- a `/termaid:mermaid` skill for explicit requests, such as rendering a file or the
+  diagrams in a PR description.
+
+Without the plugin, the same hook works from `.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "MessageDisplay": [
+      { "hooks": [ { "type": "command", "command": "termaid --claude-hook", "timeout": 10 } ] }
+    ]
+  }
+}
+```
+
+For headless use, pipe the reply through `termaid --markdown`:
+
+```
+claude -p "draw the login flow as a mermaid sequence diagram" | termaid --markdown
 ```
 
 ## Limitations

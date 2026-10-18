@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### New
+- Claude Code integration: `termaid --claude-hook` runs as a `MessageDisplay` hook and draws the mermaid blocks in Claude's replies in place while they stream, holding a fence that spans batches until it closes. The repo doubles as a plugin marketplace (`/plugin install termaid --marketplace fasouto/termaid`) that installs the hook and a `/termaid:mermaid` skill
+
 ## 0.9.1 (2026-10-18)
 
 ### New

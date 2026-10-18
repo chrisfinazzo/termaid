@@ -207,6 +207,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Read a Markdown document and render each ```mermaid block in place.",
     )
     parser.add_argument(
+        "--claude-hook",
+        action="store_true",
+        help="Run as a Claude Code MessageDisplay hook: read one batch of the "
+             "response as JSON on stdin and draw its Mermaid blocks in place.",
+    )
+    parser.add_argument(
         "--themes",
         action="store_true",
         help="List available color themes and exit.",
@@ -226,6 +232,10 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args = parser.parse_args(argv)
+
+    if args.claude_hook:
+        from .claude_hook import run_claude_hook
+        return run_claude_hook(width=args.width, use_ascii=args.ascii)
 
     if args.themes:
         return _list_themes()
