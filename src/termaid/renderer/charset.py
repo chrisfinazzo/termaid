@@ -56,6 +56,11 @@ class CharSet:
     diamond_left: str
     diamond_right: str
 
+    # Front rim of a cylinder's lid, drawn inside its sides
+    lid_left: str
+    lid_fill: str
+    lid_right: str
+
     # Endpoint types
     circle_endpoint: str
     cross_endpoint: str
@@ -91,6 +96,7 @@ UNICODE = CharSet(
     cross="┼",
     # Diamond
     diamond_top="◇", diamond_bottom="◇", diamond_left="◇", diamond_right="◇",
+    lid_left="╰", lid_fill="─", lid_right="╯",
     # Endpoints
     circle_endpoint="○", cross_endpoint="×",
     # Subgraph
@@ -121,6 +127,7 @@ ASCII = CharSet(
     cross="+",
     # Diamond
     diamond_top="/", diamond_bottom="\\", diamond_left="/", diamond_right="\\",
+    lid_left="\\", lid_fill="_", lid_right="/",
     # Endpoints
     circle_endpoint="o", cross_endpoint="x",
     # Subgraph

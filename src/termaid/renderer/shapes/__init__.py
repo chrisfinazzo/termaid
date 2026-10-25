@@ -263,14 +263,14 @@ def draw_cylinder(
         canvas.put(y, c, cs.horizontal, style=style)
     canvas.put(y, x + width - 1, cs.round_top_right, style=style)
 
-    # Second row (bottom of top ellipse)
-    canvas.put(y + 1, x, cs.round_bottom_left, style=style)
-    for c in range(x + 1, x + width - 1):
-        canvas.put(y + 1, c, cs.horizontal, style=style)
-    canvas.put(y + 1, x + width - 1, cs.round_bottom_right, style=style)
+    # Second row: the lid's front rim, inside the body's sides
+    canvas.put(y + 1, x + 1, cs.lid_left, style=style)
+    for c in range(x + 2, x + width - 2):
+        canvas.put(y + 1, c, cs.lid_fill, style=style)
+    canvas.put(y + 1, x + width - 2, cs.lid_right, style=style)
 
     # Body
-    for r in range(y + 2, y + height - 1):
+    for r in range(y + 1, y + height - 1):
         canvas.put(r, x, cs.vertical, style=style)
         canvas.put(r, x + width - 1, cs.vertical, style=style)
 

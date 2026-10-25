@@ -110,6 +110,12 @@ class TestShapeRendering:
         assert "╭" in output, "Cylinder should have rounded top"
         assert "╰" in output, "Cylinder should have rounded bottom"
 
+    def test_cylinder_lid_sits_inside_the_body(self):
+        lines = render("graph LR\n  A[(DB)]").split("\n")
+        ascii_lines = render("graph LR\n  A[(DB)]", use_ascii=True).split("\n")
+        assert (lines[0].strip(), lines[1].strip()) == ("╭──────╮", "│╰────╯│")
+        assert (ascii_lines[0].strip(), ascii_lines[1].strip()) == ("+------+", "|\\____/|")
+
     def test_all_shapes_in_one_graph(self):
         """All shapes in a single graph should render without errors."""
         output = render(
