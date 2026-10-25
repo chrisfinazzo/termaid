@@ -520,6 +520,8 @@ packet
 | `--markdown` | Read a Markdown document and draw each `mermaid` code block in place; other text passes through. A block that cannot be drawn is kept as source, with a warning |
 | `--claude-hook` | Run as a Claude Code `MessageDisplay` hook: read one batch of a reply as JSON on stdin and draw its `mermaid` blocks in place (see [Claude Code](#claude-code)) |
 | `--tui` | Interactive TUI viewer (requires `pip install termaid[tui]`) |
+| `--format FORMAT` | `text` (default) or `styled-json`: one JSON document of text chunks tagged with style keys (see [Editor and tool integration](#editor-and-tool-integration)) |
+| `--diagnostics-format FORMAT` | `text` (default) or `json`: print each error and warning on stderr as one JSON line |
 
 ## Python API
 
@@ -530,6 +532,10 @@ Render a Mermaid diagram as a plain text string. Auto-detects diagram type.
 ### `render_rich(source, ..., theme="default") -> rich.text.Text`
 
 Render as a [Rich](https://rich.readthedocs.io/) `Text` object with colors. Requires `pip install termaid[rich]`.
+
+### `render_styled(source, ...) -> dict`
+
+Render as theme-independent styled chunks, the same document that `--format styled-json` prints (see [Editor and tool integration](#editor-and-tool-integration)).
 
 ### `MermaidWidget`
 
@@ -612,6 +618,43 @@ For headless use, pipe the reply through `termaid --markdown`:
 ```
 claude -p "draw the login flow as a mermaid sequence diagram" | termaid --markdown
 ```
+
+## Editor and tool integration
+
+Editor plugins and other tools that run termaid as a subprocess can ask for
+structured output instead of terminal text.
+
+`--format styled-json` prints the diagram as one line of JSON. Each line of the
+diagram is a list of chunks, and each chunk is a run of text with one style key.
+For `graph LR; A-->B` with `--padding-x 1 --padding-y 0`, wrapped here at each
+diagram line:
+
+```
+{"version":1,"lines":[[{"text":"┌───┐","style":"node"},{"text":"    ","style":"default"},{"text":"┌───┐","style":"node"}],
+[{"text":"│","style":"node"},{"text":" ","style":"default"},{"text":"A","style":"label"},{"text":" ","style":"default"},{"text":"├","style":"node"},{"text":"───","style":"edge"},{"text":"►","style":"arrow"},{"text":"│","style":"node"},{"text":" ","style":"default"},{"text":"B","style":"label"},{"text":" ","style":"default"},{"text":"│","style":"node"}],
+[{"text":"└───┘","style":"node"},{"text":"    ","style":"default"},{"text":"└───┘","style":"node"}]]}
+```
+
+Joining the chunk texts of each line gives exactly the text output, fitted to
+`--width` the same way. The tool picks the colours. Style keys name the role of
+the cells (`node`, `edge`, `arrow`, `label`, `edge_label`, `subgraph`,
+`section:N`, and so on), and flowcharts also carry `class:<name>`,
+`nodestyle:<id>` and `linkstyle:<index>`, so the diagram's own `classDef`,
+`style` and `linkStyle` colours can be applied. `--theme` is ignored, and
+`--tui`, `--markdown` and `--claude-hook` cannot be combined with it.
+
+`--diagnostics-format json` prints each error and warning on stderr as one JSON
+line, with a stable `code` to branch on:
+
+```
+$ termaid --diagnostics-format json --width 0 diagram.mmd
+{"version": 1, "severity": "error", "code": "invalid_arguments", "message": "--width must be positive.", "details": {}, "exit_code": 2}
+```
+
+Codes: `input_missing`, `input_empty`, `invalid_arguments`,
+`input_conversion_failed`, `dependency_missing`, `render_failed`,
+`render_empty`, `output_write_failed`, and the warning `width_exceeded`
+(with `actual_width` and `max_width` in `details`).
 
 ## Limitations
 

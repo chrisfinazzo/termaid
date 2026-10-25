@@ -2,9 +2,13 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import sys
+from typing import NoReturn
+
+from .diagnostics import Diagnostic
 from .utils import display_width
 
 
@@ -18,13 +22,39 @@ def _get_version() -> str:
         return __version__
 
 
+class _ArgumentParser(argparse.ArgumentParser):
+    diagnostics_format = "text"
+
+    def error(self, message: str) -> NoReturn:
+        if self.diagnostics_format == "json":
+            Diagnostic("invalid_arguments", message, exit_code=2).emit("json")
+            self.exit(2)
+        super().error(message)
+
+
+def _report(
+    args: argparse.Namespace,
+    code: str,
+    message: str,
+    *,
+    exit_code: int = 1,
+    severity: str = "error",
+    **details: str | int,
+) -> int:
+    """Print a diagnostic in the format chosen by --diagnostics-format."""
+    diagnostic = Diagnostic(code, message, exit_code=exit_code, severity=severity, details=details)
+    return diagnostic.emit(args.diagnostics_format)
+
+
 def _max_line_width(text: str) -> int:
     """Return the width of the longest line in text."""
     return max((display_width(line) for line in text.split("\n")), default=0)
 
 
 def _plain(result) -> str:
-    """Plain-text view of a render result (str or rich.text.Text)."""
+    """Plain-text view of a render result (str, rich.text.Text or StyledDocument)."""
+    if isinstance(result, dict):
+        return "\n".join("".join(chunk["text"] for chunk in line) for line in result["lines"])
     return getattr(result, "plain", result)
 
 
@@ -75,12 +105,17 @@ def _auto_fit(
             return candidate
         result = candidate
 
-    if _max_line_width(_plain(result)) > target_width:
-        print(
-            f"Warning: diagram is {_max_line_width(_plain(result))} cols wide "
-            f"but target is {target_width}. "
+    actual_width = _max_line_width(_plain(result))
+    if actual_width > target_width:
+        _report(
+            args,
+            "width_exceeded",
+            f"diagram is {actual_width} cols wide but target is {target_width}. "
             f"Try: less -S, or use 'graph TD' for vertical layout.",
-            file=sys.stderr,
+            exit_code=0,
+            severity="warning",
+            actual_width=actual_width,
+            max_width=target_width,
         )
 
     return result
@@ -93,17 +128,21 @@ def _read_source(args: argparse.Namespace) -> str | None:
             with open(args.file, encoding="utf-8") as f:
                 return f.read()
         except FileNotFoundError:
-            print(f"Error: File not found: {args.file}", file=sys.stderr)
+            _report(args, "input_missing", f"File not found: {args.file}", path=args.file)
             return None
         except (OSError, UnicodeDecodeError) as e:
-            print(f"Error reading file: {e}", file=sys.stderr)
+            _report(args, "input_missing", f"Error reading file: {e}", path=args.file)
             return None
     elif not sys.stdin.isatty():
         return sys.stdin.read()
     else:
-        print("Error: No input provided. Pass a file or pipe input.", file=sys.stderr)
-        print("Usage: termaid diagram.mmd", file=sys.stderr)
-        print("       echo 'graph LR; A-->B' | termaid", file=sys.stderr)
+        _report(
+            args,
+            "input_missing",
+            "No input provided. Pass a file or pipe input.\n"
+            "Usage: termaid diagram.mmd\n"
+            "       echo 'graph LR; A-->B' | termaid",
+        )
         return None
 
 
@@ -118,10 +157,16 @@ def _use_color(args: argparse.Namespace) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     """Main CLI entry point."""
-    parser = argparse.ArgumentParser(
+    # Read --diagnostics-format first, so argument errors honour it too.
+    pre_parser = argparse.ArgumentParser(add_help=False)
+    pre_parser.add_argument("--diagnostics-format", default="text")
+    diagnostics_format = pre_parser.parse_known_args(argv)[0].diagnostics_format
+
+    parser = _ArgumentParser(
         prog="termaid",
         description="Render Mermaid diagrams as Unicode art in the terminal",
     )
+    parser.diagnostics_format = diagnostics_format
     parser.add_argument(
         "file",
         nargs="?",
@@ -184,6 +229,20 @@ def main(argv: list[str] | None = None) -> int:
         help="Attach labels directly to their edges",
     )
     parser.add_argument(
+        "--format",
+        dest="output_format",
+        default="text",
+        choices=["text", "styled-json"],
+        help="Output format. styled-json prints one JSON document of text "
+             "chunks tagged with style keys, for editors and other tools.",
+    )
+    parser.add_argument(
+        "--diagnostics-format",
+        default="text",
+        choices=["text", "json"],
+        help="Print errors and warnings on stderr as text or as JSON lines.",
+    )
+    parser.add_argument(
         "-o", "--output",
         default=None,
         metavar="FILE",
@@ -232,6 +291,15 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args = parser.parse_args(argv)
+    styled = args.output_format == "styled-json"
+
+    if styled and (args.claude_hook or args.tui or args.markdown):
+        return _report(
+            args,
+            "invalid_arguments",
+            "--format styled-json cannot be combined with --claude-hook, --tui or --markdown.",
+            exit_code=2,
+        )
 
     if args.claude_hook:
         from .claude_hook import run_claude_hook
@@ -243,6 +311,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.demo is not None:
         return _run_demo(args)
 
+    if args.width is not None and args.width < 1:
+        return _report(args, "invalid_arguments", "--width must be positive.", exit_code=2)
+
     # Read input
     source = _read_source(args)
     if source is None:
@@ -251,12 +322,10 @@ def main(argv: list[str] | None = None) -> int:
     # Markdown keeps its leading lines, so warnings report true line numbers.
     source = source.rstrip() if args.markdown else source.strip()
     if not source.strip():
-        print("Error: Empty input.", file=sys.stderr)
-        return 1
+        return _report(args, "input_empty", "Empty input.")
 
     if args.markdown and (args.json or args.tui):
-        print("Error: --markdown cannot be combined with --json or --tui.", file=sys.stderr)
-        return 1
+        return _report(args, "invalid_arguments", "--markdown cannot be combined with --json or --tui.")
 
     # JSON ingest: convert structured data to Mermaid syntax
     if args.json:
@@ -264,26 +333,31 @@ def main(argv: list[str] | None = None) -> int:
             from .ingest import json_to_mermaid
             source = json_to_mermaid(source, args.json)
         except Exception as e:
-            print(f"Error converting JSON to {args.json}: {e}", file=sys.stderr)
-            return 1
+            return _report(args, "input_conversion_failed", f"Error converting JSON to {args.json}: {e}")
 
     # TUI mode
     if args.tui:
         return _run_tui(source, args)
 
     # Render
-    from termaid import render, render_rich
+    from termaid import render, render_rich, render_styled
 
-    use_color = _use_color(args)
+    use_color = not styled and _use_color(args)
     if use_color:
         try:
             from rich import print as rprint
             from rich.console import Console
         except ImportError:
-            print("Error: 'rich' package required for --theme. Install with: pip install termaid[rich]", file=sys.stderr)
-            return 1
+            return _report(
+                args,
+                "dependency_missing",
+                "'rich' package required for --theme. Install with: pip install termaid[rich]",
+                dependency="rich",
+            )
 
-    if use_color:
+    if styled:
+        render_fn = render_styled
+    elif use_color:
         def render_fn(src: str, **kwargs):
             return render_rich(src, theme=args.theme or "default", **kwargs)
     else:
@@ -307,23 +381,22 @@ def main(argv: list[str] | None = None) -> int:
                         )
                         console.print(rich_result)
                 except OSError as e:
-                    print(f"Error writing to {args.output}: {e}", file=sys.stderr)
-                    return 1
+                    return _report(args, "output_write_failed", f"Error writing to {args.output}: {e}", path=args.output)
             else:
                 rprint(rich_result)
         else:
+            if styled:
+                result = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
             if args.output:
                 try:
                     with open(args.output, "w", encoding="utf-8") as f:
                         f.write(result + "\n")
                 except OSError as e:
-                    print(f"Error writing to {args.output}: {e}", file=sys.stderr)
-                    return 1
+                    return _report(args, "output_write_failed", f"Error writing to {args.output}: {e}", path=args.output)
             else:
                 print(result)
     except Exception as e:
-        print(f"Error rendering diagram: {e}", file=sys.stderr)
-        return 1
+        return _report(args, "render_failed", f"Error rendering diagram: {e}")
 
     return 0
 
@@ -370,12 +443,23 @@ def _render_markdown(text: str, args: argparse.Namespace, render_fn, use_color: 
         target = None if width is None else max(width - display_width(seg.indent), 1)
         try:
             drawn = _render_one(seg.text, args, render_fn, target)
-            if not _plain(drawn).strip():
-                raise ValueError("nothing to draw")
-            pieces.append(_indent(drawn, seg.indent))
         except Exception as e:
-            print(f"Warning: could not render the diagram at line {seg.line}: {e}", file=sys.stderr)
-            pieces.append(seg.raw)
+            failure = ("render_failed", str(e))
+        else:
+            failure = None if _plain(drawn).strip() else ("render_empty", "nothing to draw")
+        if failure is None:
+            pieces.append(_indent(drawn, seg.indent))
+            continue
+        code, reason = failure
+        _report(
+            args,
+            code,
+            f"could not render the diagram at line {seg.line}: {reason}",
+            exit_code=0,
+            severity="warning",
+            line=seg.line,
+        )
+        pieces.append(seg.raw)
 
     if not use_color:
         return "\n".join(pieces)
@@ -401,8 +485,12 @@ def _run_tui(source: str, args: argparse.Namespace) -> int:
         from textual.widgets import Static
         from termaid import render as _render
     except ImportError:
-        print("Error: 'textual' package required for --tui. Install with: pip install termaid[tui]", file=sys.stderr)
-        return 1
+        return _report(
+            args,
+            "dependency_missing",
+            "'textual' package required for --tui. Install with: pip install termaid[tui]",
+            dependency="textual",
+        )
 
     class DiagramApp(App):
         CSS = "Static { width: auto; height: auto; }"
@@ -500,9 +588,11 @@ def _run_demo(args: argparse.Namespace) -> int:
     elif demo_type in _DEMO_SOURCES:
         keys = [demo_type]
     else:
-        print(f"Unknown demo type: {demo_type}", file=sys.stderr)
-        print(f"Available: all, {', '.join(_DEMO_SOURCES.keys())}", file=sys.stderr)
-        return 1
+        return _report(
+            args,
+            "invalid_arguments",
+            f"Unknown demo type: {demo_type}\nAvailable: all, {', '.join(_DEMO_SOURCES.keys())}",
+        )
 
     use_color = _use_color(args)
 

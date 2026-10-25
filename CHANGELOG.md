@@ -4,6 +4,13 @@
 
 ### New
 - Claude Code integration: `termaid --claude-hook` runs as a `MessageDisplay` hook and draws the mermaid blocks in Claude's replies in place while they stream, holding a fence that spans batches until it closes. The repo doubles as a plugin marketplace (`/plugin install termaid --marketplace fasouto/termaid`) that installs the hook and a `/termaid:mermaid` skill
+- `--format styled-json` prints the diagram as one JSON document of text chunks tagged with style keys (`node`, `edge`, `class:<name>`, ...), for editors and tools that colour the output themselves. `termaid.render_styled()` returns the same document. Proposed by @BeckWlim in #11
+- `--diagnostics-format json` prints each error and warning on stderr as a versioned JSON line with a stable `code`, argument errors included. Proposed by @BeckWlim in #11
+
+### Behavior changes
+- `--width` must be positive; `--width 0` now exits with status 2 instead of being accepted
+- `render_rich()` honours `padding_x`, `padding_y`, `gap` and `rounded_edges` for architecture, journey, mindmap and packet diagrams the way `render()` does, so coloured and plain output have the same layout
+- `termaid --demo` with an unknown type now prefixes its message with `Error:` like every other error
 
 ## 0.9.1 (2026-10-18)
 

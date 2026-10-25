@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING
 
 from ..graph.model import Graph
 from ..renderer.canvas import Canvas
-from ..renderer.draw import render_graph_canvas
 from ..renderer.themes import get_theme
 
 if TYPE_CHECKING:
@@ -52,17 +51,13 @@ def _css_to_rich_style(props: dict[str, str]) -> str | None:
     return " ".join(parts) if parts else None
 
 
-def render_rich(
+def render_graph_rich(
+    canvas: Canvas | None,
     graph: Graph,
-    use_ascii: bool = False,
-    padding_x: int = 4,
-    padding_y: int = 2,
-    rounded_edges: bool = True,
     theme: str = "default",
-    gap: int = 4,
-    inline_edge_labels: bool = False,
 ) -> Text:
-    """Render a graph as a Rich Text object with colors.
+    """Colour a rendered graph canvas, applying the graph's own classDef,
+    style and linkStyle colours on top of the theme.
 
     Requires the 'rich' package to be installed.
     """
@@ -74,15 +69,6 @@ def render_rich(
             "Install it with: pip install termaid[rich]"
         )
 
-    canvas = render_graph_canvas(
-        graph,
-        use_ascii=use_ascii,
-        padding_x=padding_x,
-        padding_y=padding_y,
-        rounded_edges=rounded_edges,
-        gap=gap,
-        inline_edge_labels=inline_edge_labels,
-    )
     if canvas is None:
         return Text("")
 

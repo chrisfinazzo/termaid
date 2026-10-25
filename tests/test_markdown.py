@@ -121,12 +121,12 @@ class TestCliMarkdown:
         assert "line 3" in captured.err
 
     def test_render_error_is_kept_with_a_warning(self, tmp_path: Path, capsys, monkeypatch):
-        import termaid.output.text as text_out
+        import termaid.renderer.draw as draw
 
         def boom(*a, **k):
             raise RuntimeError("internal failure")
 
-        monkeypatch.setattr(text_out, "render_text", boom)
+        monkeypatch.setattr(draw, "render_graph_canvas", boom)
         rc = self._run(tmp_path, _md(FENCE + "mermaid", "graph LR", "  A --> B", FENCE))
         captured = capsys.readouterr()
         assert rc == 0

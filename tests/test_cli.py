@@ -143,15 +143,15 @@ def _strip_ansi(text: str) -> str:
 
 class TestRenderErrorPropagation:
     def test_render_raises_on_internal_error(self, monkeypatch):
-        import termaid.output.text as text_out
-        monkeypatch.setattr(text_out, "render_text", _boom)
+        import termaid.renderer.draw as draw
+        monkeypatch.setattr(draw, "render_graph_canvas", _boom)
         from termaid import render
         with pytest.raises(RuntimeError, match="internal failure"):
             render("graph LR\n  A --> B")
 
     def test_render_failure_exits_nonzero(self, tmp_path: Path, monkeypatch, capsys):
-        import termaid.output.text as text_out
-        monkeypatch.setattr(text_out, "render_text", _boom)
+        import termaid.renderer.draw as draw
+        monkeypatch.setattr(draw, "render_graph_canvas", _boom)
         mmd = tmp_path / "t.mmd"
         mmd.write_text("graph LR\n  A --> B")
         result = main([str(mmd)])
@@ -161,8 +161,8 @@ class TestRenderErrorPropagation:
         assert "Failed to render" not in captured.out
 
     def test_render_failure_does_not_write_output_file(self, tmp_path: Path, monkeypatch):
-        import termaid.output.text as text_out
-        monkeypatch.setattr(text_out, "render_text", _boom)
+        import termaid.renderer.draw as draw
+        monkeypatch.setattr(draw, "render_graph_canvas", _boom)
         mmd = tmp_path / "t.mmd"
         mmd.write_text("graph LR\n  A --> B")
         out = tmp_path / "out.txt"
