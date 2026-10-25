@@ -170,9 +170,15 @@ def _layer_order_from_grid(graph: Graph) -> list[list[str]]:
 # Layout orchestrator
 # ---------------------------------------------------------------------------
 
-def compute_layout(graph: Graph, padding_x: int = 4, padding_y: int = 2, gap: int = 4) -> GridLayout:
-    gap = max(gap, 1)  # minimum 1 for arrow visibility
+def compute_layout(
+    graph: Graph,
+    padding_x: int = 4,
+    padding_y: int = 2,
+    gap: int = 4,
+    max_label_width: int | None = None,
+) -> GridLayout:
     """Compute the grid layout for a graph."""
+    gap = max(gap, 1)  # minimum 1 for arrow visibility
     # Lazy imports to avoid circular references at module load time
     from .layers import (
         assign_layers,
@@ -221,7 +227,7 @@ def compute_layout(graph: Graph, padding_x: int = 4, padding_y: int = 2, gap: in
     place_nodes(graph, layout, layer_order, direction, gap_expansions)
 
     # Step 4: Compute column widths and row heights (with word wrapping)
-    compute_sizes(graph, layout, padding_x, padding_y, gap)
+    compute_sizes(graph, layout, padding_x, padding_y, gap, max_label_width)
 
     # Step 4b: Normalize sizes (per-layer, capped)
     normalize_sizes(graph, layout)

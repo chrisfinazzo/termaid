@@ -1,7 +1,9 @@
 """Tests for shared utility functions."""
 from __future__ import annotations
 
-from termaid.utils import display_width, truncate_to_width
+import pytest
+
+from termaid.utils import display_width, truncate_to_width, wrap_display_text
 
 
 class TestTruncateToWidth:
@@ -29,3 +31,83 @@ class TestTruncateToWidth:
     def test_tiny_width(self):
         assert display_width(truncate_to_width("中文", 1)) <= 1
         assert truncate_to_width("ab", 1) == "."
+
+
+class TestWrapDisplayText:
+    def test_prefers_word_boundaries(self):
+        assert wrap_display_text("alpha beta gamma", 10) == ["alpha beta", "gamma"]
+
+    def test_hard_breaks_unspaced_text_by_display_cells(self):
+        lines = wrap_display_text("abcdefgh", 4)
+        assert lines == ["abcd", "efgh"]
+        assert all(display_width(line) <= 4 for line in lines)
+
+    def test_can_preserve_long_tokens(self):
+        token = "A" * 30
+        assert wrap_display_text(token, 10, hard_break=False) == [token]
+
+    def test_preserves_explicit_newlines(self):
+        assert wrap_display_text("first\nsecond", 20) == ["first", "second"]
+
+    def test_rejects_non_positive_width(self):
+        with pytest.raises(ValueError):
+            wrap_display_text("text", 0)
+
+    @pytest.mark.parametrize("text,width,expected", [
+        ("metadata_shard[s].mutex", 20, ["metadata_shard[s]", ".mutex"]),
+        ("metadata_shard[s].mutex", 12, ["metadata_", "shard[s]", ".mutex"]),
+        ("metadata_shard[s].mutex", 9, ["metadata_", "shard[s]", ".mutex"]),
+        ("RealClient", 8, ["Real", "Client"]),
+        ("MasterService", 9, ["Master", "Service"]),
+        ("HTTPServer", 6, ["HTTP", "Server"]),
+        ("Client::BatchGet", 11, ["Client", "::BatchGet"]),
+        ("local-copy", 8, ["local-", "copy"]),
+        ("path/to/file", 10, ["path/to/", "file"]),
+        ("call metadata_shard[s].mutex", 20, ["call", "metadata_shard[s]", ".mutex"]),
+        ("metadata_shard[s].mutex\nnext", 20, ["metadata_shard[s]", ".mutex", "next"]),
+    ])
+    def test_meaningful_breakpoints(self, text, width, expected):
+        assert wrap_display_text(text, width) == expected
+        assert all(display_width(line) <= width for line in expected)
+
+    @pytest.mark.parametrize("text", [
+        "metadata_shard[s].mutex", "HTTPServer::GetResult", "prefix_value-name/path",
+        "abcdefghijk", "123.456789", "混合text测试.mutex",
+    ])
+    @pytest.mark.parametrize("width", [2, 3, 5, 6, 8, 10, 12, 20, 40])
+    def test_fitting_preserves_every_character_and_display_width(self, text, width):
+        lines = wrap_display_text(text, width)
+        assert "".join(lines) == text
+        assert all(line and display_width(line) <= width for line in lines)
+
+    def test_unbreakable_suffix_still_obeys_strict_width(self):
+        assert wrap_display_text(".mutex", 5) == [".mute", "x"]
+        assert wrap_display_text("metadata_shard[s].mutex", 12, hard_break=False) == ["metadata_shard[s].mutex"]
+
+    @pytest.mark.parametrize("text,width,expected", [
+        ("Read complete words here", 14, ["Read complete", "words here"]),
+        ("hello,world", 8, ["hello,", "world"]),
+        ("获取mutex结束", 8, ["获取", "mutex", "结束"]),
+        ("RPC结束", 5, ["RPC", "结束"]),
+        ("don't split words", 7, ["don't", "split", "words"]),
+        ("first paragraph\n\nsecond paragraph", 12, ["first", "paragraph", "", "second", "paragraph"]),
+    ])
+    def test_normal_text_keeps_complete_words(self, text, width, expected):
+        assert wrap_display_text(text, width) == expected
+
+    @pytest.mark.parametrize("width", [8, 10, 12, 20])
+    def test_prose_words_are_never_split_when_each_word_can_fit(self, width):
+        text = "Read complete words and keep ordinary prose readable"
+        lines = wrap_display_text(text, width)
+        assert " ".join(lines).split() == text.split()
+        assert all(display_width(line) <= width for line in lines)
+
+    @pytest.mark.parametrize("text,width,expected", [
+        ("BatchQuery 返回，T_metadata 结束", 20, ["BatchQuery 返回，", "T_metadata 结束"]),
+        ("错误，T_replica_rpc 结束", 20, ["错误，", "T_replica_rpc 结束"]),
+        ("返回整批 descriptor 或逐 key 错误，T_replica_rpc 结束", 28,
+         ["返回整批 descriptor 或逐 key", "错误，T_replica_rpc 结束"]),
+        ("alpha beta gamma", 10, ["alpha beta", "gamma"]),
+    ])
+    def test_clause_breaks_and_exact_fit_words(self, text, width, expected):
+        assert wrap_display_text(text, width) == expected

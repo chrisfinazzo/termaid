@@ -511,7 +511,9 @@ packet
 | `--padding-y N` | Vertical padding inside boxes (default: 2) |
 | `--gap N` | Space between nodes (default: 4). Use `1` or `2` for compact diagrams |
 | `--inline-edge-labels` | Attach flowchart labels directly to their edges |
-| `--width N` | Max output width. Re-renders with smaller gap/padding if exceeded |
+| `--width N` | Max output width. Re-renders with smaller gap/padding, then wraps labels, if exceeded |
+| `--strict-width` | Exit with status 2 instead of a warning when the output is still wider than `--width` |
+| `--max-height ROWS` | Exit with status 2 when the output has more than `ROWS` lines (a check, not a fitting target) |
 | `--no-auto-fit` | Disable automatic compaction when diagram exceeds terminal width |
 | `--sharp-edges` | Sharp corners on edge turns instead of rounded |
 | `-o FILE` | Write output to file instead of stdout |
@@ -653,14 +655,15 @@ $ termaid --diagnostics-format json --width 0 diagram.mmd
 
 Codes: `input_missing`, `input_empty`, `invalid_arguments`,
 `input_conversion_failed`, `dependency_missing`, `render_failed`,
-`render_empty`, `output_write_failed`, and the warning `width_exceeded`
-(with `actual_width` and `max_width` in `details`).
+`render_empty`, `output_write_failed`, `width_exceeded`, `height_exceeded`.
+With `--width` alone, `width_exceeded` is a warning with status 0 and the
+actual and target widths in `details`; with `--strict-width` it is an error.
 
 ## Limitations
 
 - **Layout engine is approximate.** Node positioning uses a grid-based barycenter heuristic. Very dense graphs may still produce some edge crossings.
 - **Manhattan-only edge routing.** Edges use A* pathfinding on a grid. The engine auto-expands gaps for crossing edges and biases toward flow-aligned routes.
-- **Wide diagrams.** The CLI auto-compacts when the diagram exceeds terminal width. For very wide LR chains, use `--width N`, `--gap 1`, or pipe through `less -S`.
+- **Wide diagrams.** The CLI auto-compacts when the diagram exceeds terminal width, and wraps labels at word boundaries when spacing alone cannot fit it. For very wide LR chains, use `--width N`, `--gap 1`, or pipe through `less -S`.
 
 ## Gallery
 

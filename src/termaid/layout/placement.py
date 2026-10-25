@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from ..graph.model import Direction, Graph
 from ..graph.shapes import NodeShape
-from ..utils import display_width
+from ..utils import display_width, wrap_display_text
 from .grid import (
     STRIDE,
     MAX_LABEL_WIDTH,
@@ -142,26 +142,6 @@ def _can_place(layout: GridLayout, gc: GridCoord) -> bool:
     return True
 
 
-def _word_wrap(text: str, max_width: int) -> list[str]:
-    """Split text at word boundaries, keeping lines under max_width."""
-    words = text.split()
-    if not words:
-        return [text]
-
-    lines: list[str] = []
-    current_line = words[0]
-
-    for word in words[1:]:
-        if display_width(current_line) + 1 + display_width(word) <= max_width:
-            current_line += " " + word
-        else:
-            lines.append(current_line)
-            current_line = word
-
-    lines.append(current_line)
-    return lines
-
-
 def normalize_sizes(graph: Graph, layout: GridLayout) -> None:
     """Normalize node dimensions within the same layer, capped at a maximum.
 
@@ -209,8 +189,15 @@ def compute_sizes(
     padding_x: int,
     padding_y: int,
     gap: int = 4,
+    max_label_width: int | None = None,
 ) -> None:
-    """Compute column widths and row heights based on node content."""
+    """Compute column widths and row heights based on node content.
+
+    Label lines wider than ``max_label_width`` (default ``MAX_LABEL_WIDTH``)
+    are wrapped at word boundaries.
+    """
+    if max_label_width is None:
+        max_label_width = MAX_LABEL_WIDTH
     for nid, placement in layout.placements.items():
         node = graph.nodes[nid]
 
@@ -225,13 +212,12 @@ def compute_sizes(
         label = node.label
         lines = label.split("\\n") if "\\n" in label else [label]
 
-        # Word-wrap lines that exceed max width
         wrapped_lines: list[str] = []
         for line in lines:
-            if display_width(line) <= MAX_LABEL_WIDTH:
+            if display_width(line) <= max_label_width:
                 wrapped_lines.append(line)
             else:
-                wrapped_lines.extend(_word_wrap(line, MAX_LABEL_WIDTH))
+                wrapped_lines.extend(wrap_display_text(line, max_label_width, hard_break=False))
 
         # Update the node's label with wrapped text
         if len(wrapped_lines) > 1 and wrapped_lines != lines:

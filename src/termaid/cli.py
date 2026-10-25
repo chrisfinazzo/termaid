@@ -76,8 +76,21 @@ def _auto_fit(
             return result
         target_width = shutil.get_terminal_size().columns
 
-    if _max_line_width(_plain(result)) <= target_width:
+    def width_of(candidate) -> int:
+        return _max_line_width(_plain(candidate))
+
+    if width_of(result) <= target_width:
         return result
+
+    def render(**overrides):
+        return render_fn(
+            source,
+            use_ascii=args.ascii,
+            padding_y=args.padding_y,
+            rounded_edges=not args.sharp_edges,
+            inline_edge_labels=args.inline_edge_labels,
+            **overrides,
+        )
 
     # Progressively compact: reduce gap, then padding
     compact_steps = [
@@ -92,21 +105,31 @@ def _auto_fit(
         px = overrides.get("padding_x", args.padding_x)
         if gap >= args.gap and px >= args.padding_x:
             continue
-        candidate = render_fn(
-            source,
-            use_ascii=args.ascii,
-            padding_x=px,
-            padding_y=args.padding_y,
-            rounded_edges=not args.sharp_edges,
-            gap=gap,
-            inline_edge_labels=args.inline_edge_labels,
-        )
-        if _max_line_width(_plain(candidate)) <= target_width:
+        candidate = render(gap=gap, padding_x=px)
+        if width_of(candidate) <= target_width:
             return candidate
         result = candidate
 
-    actual_width = _max_line_width(_plain(result))
-    if actual_width > target_width:
+    # Spacing alone was not enough: wrap labels and keep the widest label
+    # width that fits. Width 1 goes first: if it changes nothing, this diagram
+    # type ignores label width; if it still overflows, nothing will fit.
+    narrowest = render(gap=1, padding_x=0, max_label_width=1)
+    if _plain(narrowest) != _plain(result):
+        result = narrowest
+        if width_of(narrowest) <= target_width:
+            low, high = 2, min(target_width, 64)
+            while low <= high:
+                label_width = (low + high) // 2
+                candidate = render(gap=1, padding_x=0, max_label_width=label_width)
+                if width_of(candidate) <= target_width:
+                    result = candidate
+                    low = label_width + 1
+                else:
+                    high = label_width - 1
+            return result
+
+    actual_width = width_of(result)
+    if actual_width > target_width and not args.strict_width:
         _report(
             args,
             "width_exceeded",
@@ -199,7 +222,20 @@ def main(argv: list[str] | None = None) -> int:
         "--width",
         type=int,
         default=None,
-        help="Max output width. Re-renders with smaller gap/padding if exceeded.",
+        help="Max output width. Re-renders with smaller gap/padding, then wraps labels, if exceeded.",
+    )
+    parser.add_argument(
+        "--strict-width",
+        action="store_true",
+        help="Exit with status 2 instead of a warning when the output is still wider than --width.",
+    )
+    parser.add_argument(
+        "--max-height",
+        type=int,
+        default=None,
+        metavar="ROWS",
+        help="Exit with status 2 when the output has more than ROWS lines. "
+             "A check on the final output, not a fitting target.",
     )
     parser.add_argument(
         "--sharp-edges",
@@ -327,6 +363,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.markdown and (args.json or args.tui):
         return _report(args, "invalid_arguments", "--markdown cannot be combined with --json or --tui.")
 
+    if args.strict_width and args.width is None:
+        return _report(args, "invalid_arguments", "--strict-width requires --width.", exit_code=2)
+    if args.max_height is not None and args.max_height < 1:
+        return _report(args, "invalid_arguments", "--max-height must be positive.", exit_code=2)
+
     # JSON ingest: convert structured data to Mermaid syntax
     if args.json:
         try:
@@ -369,6 +410,10 @@ def main(argv: list[str] | None = None) -> int:
         else:
             result = _render_one(source, args, render_fn, target_width=args.width)
 
+        failed = _check_output(_plain(result), args)
+        if failed is not None:
+            return failed
+
         if use_color:
             rich_result = result
             if args.output:
@@ -399,6 +444,25 @@ def main(argv: list[str] | None = None) -> int:
         return _report(args, "render_failed", f"Error rendering diagram: {e}")
 
     return 0
+
+
+def _check_output(text: str, args: argparse.Namespace) -> int | None:
+    """Apply --strict-width and --max-height to the final output; 2 when violated."""
+    width = _max_line_width(text)
+    height = len(text.split("\n"))
+    if args.strict_width and width > args.width:
+        return _report(
+            args, "width_exceeded",
+            f"diagram is {width} cols wide but target is {args.width}.",
+            exit_code=2, actual_width=width, max_width=args.width,
+        )
+    if args.max_height is not None and height > args.max_height:
+        return _report(
+            args, "height_exceeded",
+            f"diagram exceeds {args.max_height} output rows.",
+            exit_code=2, actual_height=height, max_height=args.max_height,
+        )
+    return None
 
 
 def _render_one(source: str, args: argparse.Namespace, render_fn, target_width: int | None):

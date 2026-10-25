@@ -32,6 +32,124 @@ def display_width(text: str) -> int:
     return w
 
 
+def _text_break(text: str, cell_limit_end: int) -> int:
+    """Find the last word or identifier boundary inside a display-cell budget.
+
+    Keep member-access punctuation with the following name, separators with
+    the preceding segment, and camel-case/acronym components intact when they
+    fit. This is a layout heuristic, not a parser or a language tokenizer.
+    """
+    preferred_end = 0
+    for index in range(1, min(cell_limit_end + 1, len(text))):
+        previous = text[index - 1]
+        current = text[index]
+        following = text[index + 1:index + 2]
+        member_access = (
+            current == "." and not previous.isdigit()
+            or current == ":" and following == ":" and previous != ":"
+        )
+        separator = previous in "_-/,;!?，；！？" and current not in "_-/,;!?，；！？"
+        script_boundary = (
+            previous.isalpha() and current.isalpha()
+            and _is_wide(previous) != _is_wide(current)
+        )
+        camel_case = current.isupper() and (
+            previous.islower() or previous.isdigit()
+            or previous.isupper() and following.islower()
+        )
+        if member_access or separator or camel_case or script_boundary:
+            preferred_end = index
+    return preferred_end
+
+
+def wrap_display_text(
+    text: str,
+    max_width: int,
+    *,
+    hard_break: bool = True,
+) -> list[str]:
+    """Wrap text to terminal display cells, hard-breaking long tokens.
+
+    Prefer whitespace, then punctuation, script changes, and identifier
+    boundaries (member access, separators, and camel case), before splitting
+    a token by display cells. Explicit newlines are preserved. With
+    ``hard_break=False`` a token wider than ``max_width`` stays whole.
+    """
+    if max_width < 1:
+        raise ValueError("max_width must be positive")
+
+    wrapped: list[str] = []
+    for logical_line in text.split("\n"):
+        if not hard_break:
+            words = logical_line.split()
+            if not words:
+                wrapped.append(logical_line)
+                continue
+            current = words[0]
+            for word in words[1:]:
+                if display_width(current) + 1 + display_width(word) <= max_width:
+                    current += " " + word
+                else:
+                    wrapped.append(current)
+                    current = word
+            wrapped.append(current)
+            continue
+
+        remaining = logical_line
+        if remaining == "":
+            wrapped.append("")
+            continue
+
+        while display_width(remaining) > max_width:
+            used = 0
+            end = 0
+            last_space = -1
+            for index, ch in enumerate(remaining):
+                char_width = 2 if _is_wide(ch) else 1
+                if used + char_width > max_width:
+                    break
+                used += char_width
+                end = index + 1
+                if ch.isspace():
+                    last_space = end
+
+            # A width of one cannot contain a wide glyph. Keep the glyph
+            # intact and let the caller decide that the constraint is
+            # unsatisfiable rather than looping forever or corrupting UTF-8.
+            if end == 0:
+                end = 1
+
+            # A word ending exactly at the limit fits even if its following
+            # space lies outside the scan. Commas may be better boundaries
+            # than an earlier space in mixed prose and identifiers.
+            word_end = end if remaining[end:end + 1].isspace() else last_space
+            phrase_end = max((
+                index + 1 for index, character in enumerate(remaining[:end])
+                if character in ",;，；!?！？"
+            ), default=0)
+            prose_end = max(word_end, phrase_end)
+            boundary_end = _text_break(remaining, end) if prose_end <= 0 else 0
+            split_at = prose_end if prose_end > 0 else boundary_end or end
+            # Avoid orphaning a short ending when a preceding clause boundary
+            # keeps the following phrase together within the same budget.
+            if (
+                0 < phrase_end < split_at
+                and display_width(remaining[split_at:].strip()) <= max_width // 3
+                and display_width(remaining[phrase_end:].strip()) <= max_width
+            ):
+                split_at = phrase_end
+            line = remaining[:split_at].rstrip()
+            if not line:
+                line = remaining[:end]
+                split_at = end
+            wrapped.append(line)
+            remaining = remaining[split_at:].lstrip()
+
+        wrapped.append(remaining.rstrip())
+
+    return wrapped
+
+
 def truncate_to_width(text: str, width: int, ellipsis: str = ".") -> str:
     """Truncate *text* so its display width fits in *width* columns.
 

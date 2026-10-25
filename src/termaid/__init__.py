@@ -56,6 +56,7 @@ def _render_canvas(
     rounded_edges: bool,
     gap: int,
     inline_edge_labels: bool,
+    max_label_width: int | None,
 ) -> _Rendered:
     """Parse source, pick the renderer for its diagram type, and draw it."""
     # Pass padding_x and gap only when they differ from the flowchart
@@ -70,7 +71,10 @@ def _render_canvas(
     if text.startswith("sequenceDiagram"):
         from .parser.sequence import parse_sequence_diagram
         from .renderer.sequence import render_sequence
-        return _Rendered(render_sequence(parse_sequence_diagram(text), use_ascii=use_ascii, **extra))
+        return _Rendered(render_sequence(
+            parse_sequence_diagram(text), use_ascii=use_ascii,
+            max_label_width=max_label_width, **extra,
+        ))
 
     if text.startswith("classDiagram"):
         from .parser.classdiagram import parse_class_diagram
@@ -158,6 +162,7 @@ def _render_canvas(
         rounded_edges=rounded_edges,
         gap=gap,
         inline_edge_labels=inline_edge_labels,
+        max_label_width=max_label_width,
     )
     return _Rendered(canvas, graph)
 
@@ -171,6 +176,7 @@ def render(
     rounded_edges: bool = True,
     gap: int = 4,
     inline_edge_labels: bool = False,
+    max_label_width: int | None = None,
 ) -> str:
     """Render mermaid syntax as Unicode (or ASCII) art.
 
@@ -181,6 +187,9 @@ def render(
         padding_y: Vertical padding inside node boxes
         gap: Space between nodes (default: 4)
         inline_edge_labels: Attach flowchart labels directly to their edges
+        max_label_width: Wrap labels wider than this many columns at word
+            boundaries. Applies to flowcharts (default 20) and sequence
+            diagrams (unwrapped by default); other diagram types ignore it.
 
     Returns:
         Rendered diagram as a string
@@ -197,6 +206,7 @@ def render(
         rounded_edges=rounded_edges,
         gap=gap,
         inline_edge_labels=inline_edge_labels,
+        max_label_width=max_label_width,
     ).canvas
     return canvas.to_string() if canvas is not None else ""
 
@@ -211,6 +221,7 @@ def render_rich(
     theme: str = "default",
     gap: int = 4,
     inline_edge_labels: bool = False,
+    max_label_width: int | None = None,
 ):
     """Render mermaid syntax as a Rich Text object with colors.
 
@@ -224,6 +235,9 @@ def render_rich(
         theme: Color theme name (default, terra, neon, mono, amber, phosphor)
         gap: Space between nodes (default: 4)
         inline_edge_labels: Attach flowchart labels directly to their edges
+        max_label_width: Wrap labels wider than this many columns at word
+            boundaries. Applies to flowcharts (default 20) and sequence
+            diagrams (unwrapped by default); other diagram types ignore it.
 
     Returns:
         rich.text.Text object
@@ -238,6 +252,7 @@ def render_rich(
         rounded_edges=rounded_edges,
         gap=gap,
         inline_edge_labels=inline_edge_labels,
+        max_label_width=max_label_width,
     )
     if rendered.graph is not None:
         return render_graph_rich(rendered.canvas, rendered.graph, theme=theme)
@@ -253,6 +268,7 @@ def render_styled(
     rounded_edges: bool = True,
     gap: int = 4,
     inline_edge_labels: bool = False,
+    max_label_width: int | None = None,
 ) -> StyledDocument:
     """Render mermaid syntax as theme-independent styled chunks.
 
@@ -273,6 +289,7 @@ def render_styled(
         rounded_edges=rounded_edges,
         gap=gap,
         inline_edge_labels=inline_edge_labels,
+        max_label_width=max_label_width,
     ).canvas)
 
 

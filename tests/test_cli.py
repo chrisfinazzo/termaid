@@ -81,6 +81,96 @@ class TestCliWidth:
         assert result == 0
 
 
+LONG_SEQUENCE = (
+    "sequenceDiagram\n"
+    "  participant Gateway\n  participant Orders\n"
+    "  Gateway->>Orders: please fetch the complete order history for this customer\n"
+    "  Orders-->>Gateway: the rows, or an empty list when nothing matched\n"
+)
+
+
+class TestCliWrapFit:
+    def _render(self, tmp_path: Path, capsys, *flags: str):
+        mmd = tmp_path / "seq.mmd"
+        mmd.write_text(LONG_SEQUENCE)
+        status = main([str(mmd), *flags])
+        captured = capsys.readouterr()
+        return status, captured.out, captured.err
+
+    def test_width_wraps_labels_when_compaction_is_not_enough(self, tmp_path: Path, capsys):
+        from termaid import render
+        compacted = render(LONG_SEQUENCE, gap=1, padding_x=0)
+        assert max(len(line) for line in compacted.splitlines()) > 60
+        status, out, err = self._render(tmp_path, capsys, "--width", "60")
+        assert status == 0
+        assert "Warning" not in err
+        lines = out.rstrip("\n").split("\n")
+        assert max(len(line) for line in lines) <= 60
+        words = set(LONG_SEQUENCE.replace(":", " ").replace(",", " ").split())
+        assert all(word in words for line in lines for word in line.replace("┆", " ").split() if word.isalpha())
+
+    def test_short_labels_still_wrap_when_spacing_cannot_fit(self, capsys):
+        fixture = Path(__file__).parent / "fixtures/sequence/showcase_microservice_orchestration.mmd"
+        assert main([str(fixture), "--width", "50", "--strict-width"]) == 0
+        out = capsys.readouterr().out
+        assert max(len(line) for line in out.splitlines()) <= 50
+        assert "Validate" in out and "token" in out
+
+    def test_stage_three_stops_after_one_render_for_types_that_ignore_label_width(self):
+        import argparse
+        from termaid import render
+        from termaid.cli import _auto_fit
+        source = 'pie title Languages\n  "Python" : 45\n  "Go" : 30\n  "Rust" : 25'
+        args = argparse.Namespace(
+            gap=4, padding_x=4, padding_y=2, ascii=False, sharp_edges=False,
+            inline_edge_labels=False, no_auto_fit=False, strict_width=False,
+            diagnostics_format="text",
+        )
+        calls: list[dict] = []
+
+        def counting_render(src, **kwargs):
+            calls.append(kwargs)
+            return render(src, **kwargs)
+
+        first = render(source)
+        fitted = _auto_fit(first, source, args, render_fn=counting_render, target_width=10)
+        assert fitted == render(source, gap=1, padding_x=0)
+        assert [c["max_label_width"] for c in calls if "max_label_width" in c] == [1]
+
+    def test_large_width_leaves_output_byte_identical(self, tmp_path: Path, capsys):
+        _, plain, _ = self._render(tmp_path, capsys)
+        _, fitted, _ = self._render(tmp_path, capsys, "--width", "500")
+        assert fitted == plain
+
+    def test_strict_width_exit_codes(self, tmp_path: Path, capsys):
+        assert self._render(tmp_path, capsys, "--width", "60", "--strict-width")[0] == 0
+        status, out, err = self._render(tmp_path, capsys, "--width", "6", "--strict-width")
+        assert status == 2
+        assert out == ""
+        assert "Error: diagram is" in err and "target is 6" in err
+
+    def test_strict_width_requires_width(self, tmp_path: Path, capsys):
+        status, _, err = self._render(tmp_path, capsys, "--strict-width")
+        assert status == 2
+        assert "--width" in err
+
+    def test_max_height(self, tmp_path: Path, capsys):
+        status, out, _ = self._render(tmp_path, capsys, "--max-height", "40")
+        assert status == 0 and out
+        status, out, err = self._render(tmp_path, capsys, "--max-height", "3")
+        assert status == 2
+        assert out == ""
+        assert "Error: diagram exceeds 3 output rows." in err
+        assert self._render(tmp_path, capsys, "--max-height", "0")[0] == 2
+
+    def test_checks_apply_to_whole_markdown_output(self, tmp_path: Path, capsys):
+        doc = tmp_path / "doc.md"
+        doc.write_text("intro\n\n```mermaid\n" + LONG_SEQUENCE + "```\n")
+        assert main([str(doc), "--markdown", "--max-height", "2"]) == 2
+        assert "exceeds 2 output rows" in capsys.readouterr().err
+        assert main([str(doc), "--markdown", "--width", "60", "--strict-width"]) == 0
+
+
 class TestCliNoColor:
     def test_no_color_env(self):
         from termaid.cli import _use_color

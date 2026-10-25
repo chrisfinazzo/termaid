@@ -4,8 +4,13 @@
 
 ### New
 - Claude Code integration: `termaid --claude-hook` runs as a `MessageDisplay` hook and draws the mermaid blocks in Claude's replies in place while they stream, holding a fence that spans batches until it closes. The repo doubles as a plugin marketplace (`/plugin install termaid --marketplace fasouto/termaid`) that installs the hook and a `/termaid:mermaid` skill
-- `--format styled-json` prints the diagram as one JSON document of text chunks tagged with style keys (`node`, `edge`, `class:<name>`, ...), for editors and tools that colour the output themselves. `termaid.render_styled()` returns the same document. Proposed by @BeckWlim in #11
-- `--diagnostics-format json` prints each error and warning on stderr as a versioned JSON line with a stable `code`, argument errors included. Proposed by @BeckWlim in #11
+- Wrap-mode fitting: when `--width` cannot fit a diagram by tightening spacing alone, labels now wrap at word boundaries (sequence participants, messages, notes and frame titles; flowchart node labels) and the widest wrap that fits is kept. Output is unchanged whenever the diagram already fits
+- `--strict-width`: exit with status 2 instead of a warning when the output is still wider than `--width`
+- `--max-height ROWS`: exit with status 2 when the output has more lines than `ROWS`
+- `--format styled-json` prints the diagram as one JSON document of text chunks tagged with style keys (`node`, `edge`, `class:<name>`, ...), for editors and tools that colour the output themselves. `termaid.render_styled()` returns the same document
+- `--diagnostics-format json` prints each error and warning on stderr as a versioned JSON line with a stable `code`, argument errors included
+- Python API: `render()` and `render_rich()` take `max_label_width` to wrap labels in flowcharts and sequence diagrams
+- The styled output, the JSON diagnostics, the wrap-mode fitting and the two strict flags come from @BeckWlim's proposal and fork in #11, ported to the current layout code
 
 ### Behavior changes
 - `--width` must be positive; `--width 0` now exits with status 2 instead of being accepted

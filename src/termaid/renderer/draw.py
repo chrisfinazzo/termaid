@@ -30,6 +30,7 @@ def render_graph(
     rounded_edges: bool = True,
     gap: int = 4,
     inline_edge_labels: bool = False,
+    max_label_width: int | None = None,
 ) -> str:
     """Render a graph to a string.
 
@@ -41,6 +42,7 @@ def render_graph(
         rounded_edges: Use rounded corners on edge turns (╭╮╰╯ vs ┌┐└┘)
         gap: Space between nodes (default: 4)
         inline_edge_labels: Attach labels directly to their edge segments
+        max_label_width: Wrap node labels wider than this (default: 20)
 
     Returns:
         The rendered diagram as a string
@@ -48,7 +50,7 @@ def render_graph(
     canvas = render_graph_canvas(
         graph, use_ascii=use_ascii, padding_x=padding_x, padding_y=padding_y,
         rounded_edges=rounded_edges, gap=gap,
-        inline_edge_labels=inline_edge_labels,
+        inline_edge_labels=inline_edge_labels, max_label_width=max_label_width,
     )
     if canvas is None:
         return ""
@@ -63,6 +65,7 @@ def render_graph_canvas(
     rounded_edges: bool = True,
     gap: int = 4,
     inline_edge_labels: bool = False,
+    max_label_width: int | None = None,
 ) -> Canvas | None:
     """Render a graph and return the Canvas (with style info).
 
@@ -85,7 +88,7 @@ def render_graph_canvas(
         graph.direction = Direction.LR
 
     # Layout
-    layout = compute_layout(graph, padding_x, padding_y, gap)
+    layout = compute_layout(graph, padding_x, padding_y, gap, max_label_width)
 
     # Route edges
     routed = route_edges(graph, layout)

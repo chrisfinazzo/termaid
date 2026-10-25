@@ -258,3 +258,21 @@ class TestSiblingAlignment:
         layout = compute_layout(parse_flowchart("graph TD\n  A --> B\n  A --> C\n  A --> D\n"))
         g = {nid: p.grid for nid, p in layout.placements.items()}
         assert g["A"].col == g["C"].col
+
+
+class TestMaxLabelWidth:
+    SOURCE = "graph TD\n  A[Read complete words]"
+
+    def test_explicit_width_wraps_at_word_boundaries(self):
+        from termaid import render
+        output = render(self.SOURCE, max_label_width=8)
+        rows = output.splitlines()
+        assert "Read complete" not in output
+        words = ["Read", "complete", "words"]
+        row_of = {word: next(i for i, row in enumerate(rows) if word in row) for word in words}
+        assert [row_of[w] for w in words] == list(range(row_of["Read"], row_of["Read"] + 3))
+
+    def test_default_output_unchanged(self):
+        from termaid import render
+        assert render(self.SOURCE) == render(self.SOURCE, max_label_width=None)
+        assert "Read complete words" in render(self.SOURCE)
