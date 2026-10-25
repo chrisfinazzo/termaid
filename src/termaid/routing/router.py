@@ -7,9 +7,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
+from typing import Callable
 
 from ..graph.model import Direction, Edge, Graph
-from ..layout.grid import GridLayout, NodePlacement, SubgraphBounds
+from ..layout.grid import SG_BORDER_PAD, GridLayout, NodePlacement, SubgraphBounds
 from .pathfinder import find_path, simplify_path
 
 
@@ -50,6 +51,7 @@ def route_edges(graph: Graph, layout: GridLayout) -> list[RoutedEdge]:
     # Grid regions of each subgraph box: edges that neither start nor end
     # in a subgraph should avoid routing through its box.
     sg_regions = _compute_sg_regions(layout, sg_bounds)
+    facing_homes: list[tuple[RoutedEdge, set[str]]] = []
 
     for i, edge in enumerate(graph.edges):
         src, tgt = _resolve_endpoints(edge, layout, sg_bounds)
@@ -64,18 +66,26 @@ def route_edges(graph: Graph, layout: GridLayout) -> list[RoutedEdge]:
             continue
 
         forbidden = _foreign_sg_cells(edge, graph, sg_regions)
-        re = _route_edge(edge, src, tgt, layout, direction, soft_obstacles | forbidden)
+        facing = _flow_facing_homes(edge, graph, src, tgt, sg_regions, direction)
+        re = _route_edge(
+            edge, src, tgt, layout, direction, soft_obstacles | forbidden,
+            _side_exit_penalty(facing, sg_regions, direction),
+        )
         re.index = i
         soft_obstacles.update(re.occupied_cells)
+        routed.append(re)
+        facing_homes.append((re, facing))
 
-        # Snap subgraph-endpoint edges onto the subgraph border so they
-        # attach to the box, not to the inner node used for routing.
+    _fit_boxes_to_corridors(facing_homes, layout, sg_bounds, sg_regions, direction)
+
+    # Snap subgraph-endpoint edges onto the subgraph border so they
+    # attach to the box, not to the inner node used for routing.
+    for re in routed:
+        edge = re.edge
         if edge.source_is_subgraph and edge.source in sg_bounds:
             _clip_endpoint_to_box(re.draw_path, sg_bounds[edge.source], from_start=True)
         if edge.target_is_subgraph and edge.target in sg_bounds:
             _clip_endpoint_to_box(re.draw_path, sg_bounds[edge.target], from_start=False)
-
-        routed.append(re)
 
     # Post-process: spread edges that share the same target endpoint so
     # arrows don't overlap on the same cell.  Start points are NOT spread
@@ -346,29 +356,66 @@ def _clip_endpoint_to_box(
 def _compute_sg_regions(
     layout: GridLayout,
     sg_bounds: dict[str, SubgraphBounds],
-) -> dict[str, set[tuple[int, int]]]:
-    """Grid cells covered by each subgraph box (member blocks + border channels)."""
-    regions: dict[str, set[tuple[int, int]]] = {}
+) -> dict[str, tuple[int, int, int, int]]:
+    """Grid extent (min_col, max_col, min_row, max_row) of each subgraph box:
+    its member blocks plus their border channels."""
+    regions: dict[str, tuple[int, int, int, int]] = {}
     for sg_id, sb in sg_bounds.items():
         members = _sg_member_placements(sb, layout)
         if not members:
             continue
-        min_col = min(p.grid.col for p in members) - 1
-        max_col = max(p.grid.col for p in members) + 1
-        min_row = min(p.grid.row for p in members) - 1
-        max_row = max(p.grid.row for p in members) + 1
-        regions[sg_id] = {
-            (c, r)
-            for c in range(min_col, max_col + 1)
-            for r in range(min_row, max_row + 1)
-        }
+        regions[sg_id] = (
+            min(p.grid.col for p in members) - 1,
+            max(p.grid.col for p in members) + 1,
+            min(p.grid.row for p in members) - 1,
+            max(p.grid.row for p in members) + 1,
+        )
     return regions
+
+
+def _home_chain(endpoint: str, is_sg: bool, graph: Graph) -> list[str]:
+    """The subgraph an endpoint lives in, then its ancestors."""
+    sg = graph.find_subgraph_by_id(endpoint) if is_sg else graph.find_subgraph_for_node(endpoint)
+    chain: list[str] = []
+    while sg:
+        chain.append(sg.id)
+        sg = sg.parent
+    return chain
+
+
+def _flow_facing_homes(
+    edge: Edge,
+    graph: Graph,
+    src: NodePlacement,
+    tgt: NodePlacement,
+    sg_regions: dict[str, tuple[int, int, int, int]],
+    direction: Direction,
+) -> set[str]:
+    """Home subgraphs the edge has no reason to leave through the side.
+
+    That is every home subgraph, except one whose layers the far endpoint
+    shares from outside the box: an edge to a node beside the box has to
+    cross its side border.
+    """
+    src_chain = _home_chain(edge.source, edge.source_is_subgraph, graph)
+    tgt_chain = _home_chain(edge.target, edge.target_is_subgraph, graph)
+    facing: set[str] = set()
+    for chain, other_chain, other in ((src_chain, tgt_chain, tgt), (tgt_chain, src_chain, src)):
+        other_flow = other.grid.row if direction.is_vertical else other.grid.col
+        for sg_id in chain:
+            if sg_id not in sg_regions:
+                continue
+            c0, c1, r0, r1 = sg_regions[sg_id]
+            f0, f1 = (r0, r1) if direction.is_vertical else (c0, c1)
+            if sg_id in other_chain or not f0 <= other_flow <= f1:
+                facing.add(sg_id)
+    return facing
 
 
 def _foreign_sg_cells(
     edge: Edge,
     graph: Graph,
-    sg_regions: dict[str, set[tuple[int, int]]],
+    sg_regions: dict[str, tuple[int, int, int, int]],
 ) -> set[tuple[int, int]]:
     """Cells of subgraph boxes this edge should avoid routing through.
 
@@ -378,34 +425,124 @@ def _foreign_sg_cells(
     if not sg_regions:
         return set()
 
-    allowed: set[str] = set()
+    allowed = set(
+        _home_chain(edge.source, edge.source_is_subgraph, graph)
+        + _home_chain(edge.target, edge.target_is_subgraph, graph)
+    )
     for endpoint, is_sg in (
         (edge.source, edge.source_is_subgraph),
         (edge.target, edge.target_is_subgraph),
     ):
         if is_sg:
-            sg = graph.find_subgraph_by_id(endpoint)
-            # The subgraph itself, its ancestors, and its descendants: the
-            # borrowed attachment cell may sit inside a nested child box.
-            stack = [sg] if sg else []
+            # Descendants too: the borrowed attachment cell may sit inside
+            # a nested child box.
+            stack = [graph.find_subgraph_by_id(endpoint)]
             while stack:
                 cur = stack.pop()
-                allowed.add(cur.id)
-                stack.extend(cur.children)
-            while sg:
-                allowed.add(sg.id)
-                sg = sg.parent
-        else:
-            sg = graph.find_subgraph_for_node(endpoint)
-            while sg:
-                allowed.add(sg.id)
-                sg = sg.parent
+                if cur:
+                    allowed.add(cur.id)
+                    stack.extend(cur.children)
 
     cells: set[tuple[int, int]] = set()
-    for sg_id, region in sg_regions.items():
+    for sg_id, (c0, c1, r0, r1) in sg_regions.items():
         if sg_id not in allowed:
-            cells |= region
+            cells.update((c, r) for c in range(c0, c1 + 1) for r in range(r0, r1 + 1))
     return cells
+
+
+def _side_exit_penalty(
+    homes: set[str],
+    sg_regions: dict[str, tuple[int, int, int, int]],
+    direction: Direction,
+) -> Callable[[int, int], float] | None:
+    """Cost of a cell beside one of the edge's home subgraphs.
+
+    Leaving a subgraph through its side means running alongside it outside
+    the box. Charging those cells makes the edge cross the border on the
+    flow-facing side and go around sibling nodes in the gap column next to
+    them, which ``_fit_boxes_to_corridors`` then keeps inside the box.
+    """
+    bands = []
+    for sg_id in homes:
+        c0, c1, r0, r1 = sg_regions[sg_id]
+        if direction.is_vertical:
+            bands.append((r0, r1, c0 - 1, c1 + 1))
+        else:
+            bands.append((c0, c1, r0 - 1, r1 + 1))
+    if not bands:
+        return None
+
+    def penalty(col: int, row: int) -> float:
+        flow, cross = (row, col) if direction.is_vertical else (col, row)
+        return 2.0 * sum(
+            1 for f0, f1, x0, x1 in bands
+            if f0 <= flow <= f1 and not x0 <= cross <= x1
+        )
+    return penalty
+
+
+def _fit_boxes_to_corridors(
+    facing_homes: list[tuple[RoutedEdge, set[str]]],
+    layout: GridLayout,
+    sg_bounds: dict[str, SubgraphBounds],
+    sg_regions: dict[str, tuple[int, int, int, int]],
+    direction: Direction,
+) -> None:
+    """Widen a subgraph box over the gap column beside its nodes when one
+    of its edges runs there.
+
+    Boxes hug their nodes, but the gap column next to the outermost nodes
+    is the only corridor an edge has for going around them, and its center
+    lies past the border padding.
+    """
+    vertical = direction.is_vertical
+    for re, facing in facing_homes:
+        for sg_id in facing:
+            c0, c1, r0, r1 = sg_regions[sg_id]
+            f0, f1, x0, x1 = (r0, r1, c0, c1) if vertical else (c0, c1, r0, r1)
+            step = (0, 1) if vertical else (1, 0)
+            beside = {
+                (c, r) for c, r in re.occupied_cells
+                if f0 <= (r if vertical else c) <= f1
+                and (c if vertical else r) in (x0 - 1, x1 + 1)
+            }
+            # Only a run along the side counts; a single cell is the edge
+            # crossing the corridor on its way into or out of the box.
+            corridor = [
+                layout.grid_to_draw_center(c, r)
+                for c, r in sorted(beside)
+                if (c + step[0], r + step[1]) in beside
+                or (c - step[0], r - step[1]) in beside
+            ]
+            if corridor:
+                _grow_box(sg_bounds[sg_id], corridor, layout, vertical)
+
+    # Parents come after their children in subgraph_bounds.
+    for sb in layout.subgraph_bounds:
+        for child in sb.subgraph.children:
+            cb = sg_bounds.get(child.id)
+            if cb:
+                corners = [(cb.x, cb.y), (cb.x + cb.width - 1, cb.y + cb.height - 1)]
+                _grow_box(sb, corners, layout, vertical)
+
+
+def _grow_box(
+    sb: SubgraphBounds,
+    points: list[tuple[int, int]],
+    layout: GridLayout,
+    vertical: bool,
+) -> None:
+    """Grow the box across the flow axis to keep SG_BORDER_PAD around points."""
+    if vertical:
+        lo = min(sb.x, min(x for x, _ in points) - SG_BORDER_PAD)
+        hi = max(sb.x + sb.width - 1, max(x for x, _ in points) + SG_BORDER_PAD)
+        sb.x, sb.width = lo, hi - lo + 1
+        layout.canvas_width = max(layout.canvas_width, hi + 1)
+    else:
+        lo = min(sb.y, min(y for _, y in points) - SG_BORDER_PAD)
+        hi = max(sb.y + sb.height - 1, max(y for _, y in points) + SG_BORDER_PAD)
+        sb.y, sb.height = lo, hi - lo + 1
+        layout.canvas_height = max(layout.canvas_height, hi + 1)
 
 
 def _get_attach_point(
@@ -480,6 +617,7 @@ def _route_edge(
     layout: GridLayout,
     direction: Direction,
     soft_obstacles: set[tuple[int, int]],
+    penalty: Callable[[int, int], float] | None = None,
 ) -> RoutedEdge:
     """Route a single edge between two nodes."""
     preferred, alt = _determine_directions(src, tgt, direction)
@@ -495,6 +633,7 @@ def _route_edge(
         end_pref[0], end_pref[1],
         lambda c, r: layout.is_free(c, r),
         soft_obstacles,
+        penalty=penalty,
     )
 
     # Try alternative path
@@ -506,6 +645,7 @@ def _route_edge(
         end_alt[0], end_alt[1],
         lambda c, r: layout.is_free(c, r),
         soft_obstacles,
+        penalty=penalty,
     )
 
     # Pick path: prefer the flow-aligned direction unless the alternative

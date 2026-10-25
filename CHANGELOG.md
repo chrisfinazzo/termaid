@@ -21,6 +21,7 @@
 
 ### Fixes
 - Flowchart subgraphs: a node mentioned inside two subgraphs now belongs only to the first one that closes, as in Mermaid. The two boxes no longer overlap or share a border row, and every subgraph border gets its own row with its padding and label space
+- Flowchart subgraphs: an edge from a node in one subgraph to a node in the subgraph below now leaves through the bottom border and enters through the top border, going around sibling nodes inside the box instead of running down outside it. A box widens over the gap column beside its nodes only when one of its own edges runs there
 
 ## 0.9.1 (2026-10-18)
 

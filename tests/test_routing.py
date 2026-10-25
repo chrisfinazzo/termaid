@@ -222,3 +222,36 @@ class TestSubgraphEdgeRouting:
         g = parse_flowchart(src)
         layout = compute_layout(g)
         route_edges(g, layout)  # must not raise
+
+
+class TestCrossingEdgeBetweenStackedSubgraphs:
+    """An edge from one subgraph into the one below leaves through the bottom
+    border and enters through the top border, without running outside."""
+
+    def _render(self) -> list[str]:
+        from termaid import render
+        from tests.conftest import FLOWCHARTS_DIR
+
+        return render((FLOWCHARTS_DIR / "subgraph_crossing_edge.mmd").read_text()).split("\n")
+
+    def test_edge_stays_within_subgraph_columns(self):
+        from tests.conftest import find_box
+
+        lines = self._render()
+        a, b = find_box(lines, "A"), find_box(lines, "B")
+        lo, hi = min(a[2], b[2]), max(a[3], b[3])
+        outside = [
+            (row, col, ch)
+            for row, line in enumerate(lines)
+            for col, ch in enumerate(line)
+            if ch != " " and not lo <= col <= hi
+        ]
+        assert outside == []
+
+    def test_edge_crosses_facing_borders(self):
+        from tests.conftest import find_box
+
+        lines = self._render()
+        a, b = find_box(lines, "A"), find_box(lines, "B")
+        assert "┼" in lines[a[1]][a[2]:a[3] + 1]
+        assert "┼" in lines[b[0]][b[2]:b[3] + 1]

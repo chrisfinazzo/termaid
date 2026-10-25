@@ -41,6 +41,7 @@ def find_path(
     is_free: Callable[[int, int], bool],
     soft_obstacles: set[tuple[int, int]] | None = None,
     max_iterations: int = 5000,
+    penalty: Callable[[int, int], float] | None = None,
 ) -> list[tuple[int, int]] | None:
     """Find a path from start to end using A*.
 
@@ -50,6 +51,7 @@ def find_path(
         is_free: Function that returns True if a cell is not occupied by a node
         soft_obstacles: Set of cells occupied by previously-routed edges (cost +2)
         max_iterations: Maximum iterations before giving up
+        penalty: Extra cost of stepping onto a cell, on top of soft obstacles
 
     Returns:
         List of (col, row) waypoints, or None if no path found
@@ -99,6 +101,8 @@ def find_path(
             step_cost = 1.0
             if nkey in soft:
                 step_cost += 2.0
+            if penalty is not None:
+                step_cost += penalty(nc, nr)
 
             # Corner penalty: if direction changes from parent's direction
             if current.parent is not None:
