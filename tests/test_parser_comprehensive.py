@@ -358,3 +358,54 @@ class TestSemicolonStatements:
         g = parse_flowchart("graph LR; A --> B; B --> C")
         assert set(g.nodes) == {"A", "B", "C"}
         assert len(g.edges) == 2
+
+
+class TestQuotedLabelText:
+    def test_percent_pair_inside_quotes_is_label_text(self):
+        g = parse_flowchart('graph LR\n  A["50%% off"] --> B')
+        assert g.nodes["A"].label == "50%% off"
+        assert [(e.source, e.target) for e in g.edges] == [("A", "B")]
+
+    def test_comments_outside_quotes_still_stripped(self):
+        g = parse_flowchart('graph LR\n  %% A --> C\n  A["50%% off"] --> B %% B --> D')
+        assert set(g.nodes) == {"A", "B"}
+        assert [(e.source, e.target) for e in g.edges] == [("A", "B")]
+
+    def test_class_suffix_after_quoted_triple_colon(self):
+        g = parse_flowchart('graph LR\n  A["x:::y"]:::hot')
+        assert g.nodes["A"].label == "x:::y"
+        assert g.nodes["A"].style_class == "hot"
+
+    def test_triple_colon_inside_quotes_is_not_a_class(self):
+        g = parse_flowchart('graph LR\n  A["x:::y"]')
+        assert g.nodes["A"].label == "x:::y"
+        assert g.nodes["A"].style_class is None
+
+
+class TestEntityCodes:
+    def test_mermaid_docs_example(self):
+        g = parse_flowchart('graph LR\n  A["A double quote:#quot;"] --> B["A dec char:#9829;"]')
+        assert g.nodes["A"].label == 'A double quote:"'
+        assert g.nodes["B"].label == "A dec char:♥"
+
+    def test_html_character_names(self):
+        g = parse_flowchart('graph LR\n  A["Tom #amp; Jerry"] --> B["#lt;tag#gt;"]')
+        assert g.nodes["A"].label == "Tom & Jerry"
+        assert g.nodes["B"].label == "<tag>"
+
+    def test_unknown_names_and_bare_hash_are_kept(self):
+        g = parse_flowchart('graph LR\n  A["#notathing; and # sign"]')
+        assert g.nodes["A"].label == "#notathing; and # sign"
+
+    def test_edge_label(self):
+        g = parse_flowchart('graph LR\n  A -->|"#quot;yes#quot;"| B')
+        assert g.edges[0].label == '"yes"'
+
+    def test_subgraph_title(self):
+        g = parse_flowchart('graph LR\n  subgraph one ["Tom #amp; Jerry"]\n    A\n  end')
+        assert g.subgraphs[0].label == "Tom & Jerry"
+
+    def test_markdown_label(self):
+        g = parse_flowchart('graph LR\n  A["`**#lt;b#gt;** #amp;`"]')
+        assert g.nodes["A"].label == "<b> &"
+        assert [s.text for s in g.nodes["A"].label_segments] == ["<b>", " &"]

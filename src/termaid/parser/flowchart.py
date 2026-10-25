@@ -7,8 +7,9 @@ chained arrows, & operator.
 """
 from __future__ import annotations
 
+import html.entities
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from ..graph.model import ArrowType, Direction, Edge, EdgeStyle, Graph, LabelSegment, Node, Subgraph
 from ..graph.shapes import NodeShape
@@ -150,8 +151,8 @@ def parse_flowchart(text: str) -> Graph:
 
 
 def _strip_comments(line: str) -> str:
-    """Remove %% comments from a line."""
-    idx = line.find("%%")
+    """Remove %% comments from a line, leaving %% inside quoted labels."""
+    idx = _mask_quotes(line).find("%%")
     if idx >= 0:
         return line[:idx]
     return line
@@ -169,7 +170,6 @@ def _parse_markdown_label(text: str) -> tuple[str, list[LabelSegment]] | None:
 
     md = stripped[2:-2]  # strip "` and `"
     segments: list[LabelSegment] = []
-    plain_parts: list[str] = []
     i = 0
     while i < len(md):
         # Bold: **text**
@@ -178,7 +178,6 @@ def _parse_markdown_label(text: str) -> tuple[str, list[LabelSegment]] | None:
             if end != -1:
                 inner = md[i+2:end]
                 segments.append(LabelSegment(text=inner, bold=True))
-                plain_parts.append(inner)
                 i = end + 2
                 continue
         # Italic: *text*
@@ -187,7 +186,6 @@ def _parse_markdown_label(text: str) -> tuple[str, list[LabelSegment]] | None:
             if end != -1:
                 inner = md[i+1:end]
                 segments.append(LabelSegment(text=inner, italic=True))
-                plain_parts.append(inner)
                 i = end + 1
                 continue
         # Plain text: collect until next *
@@ -195,11 +193,10 @@ def _parse_markdown_label(text: str) -> tuple[str, list[LabelSegment]] | None:
         while j < len(md) and md[j] != "*":
             j += 1
         segments.append(LabelSegment(text=md[i:j]))
-        plain_parts.append(md[i:j])
         i = j
 
-    plain = "".join(plain_parts)
-    return plain, segments
+    segments = [replace(s, text=_decode_entities(s.text)) for s in segments]
+    return "".join(s.text for s in segments), segments
 
 
 def _parse_css_props(text: str) -> dict[str, str]:
@@ -212,13 +209,30 @@ def _parse_css_props(text: str) -> dict[str, str]:
     return props
 
 
-def _inside_quotes(text: str, pos: int) -> bool:
-    """Check if a position in text is inside a double-quoted string."""
+def _mask_quotes(text: str) -> str:
+    """Blank out the inside of double-quoted spans, keeping every index in place."""
+    result = list(text)
     in_quote = False
-    for i in range(pos):
-        if text[i] == '"':
+    for i, ch in enumerate(result):
+        if ch == '"':
             in_quote = not in_quote
-    return in_quote
+        elif in_quote:
+            result[i] = " "
+    return "".join(result)
+
+
+_ENTITY_CODE = re.compile(r"#([A-Za-z0-9]+);")
+
+
+def _decode_entities(text: str) -> str:
+    """Decode Mermaid entity codes: #quot; and other HTML names, #9829; in base 10."""
+    def decode(m: re.Match[str]) -> str:
+        code = m.group(1)
+        if code.isdigit():
+            return html.unescape(f"&#{code};")
+        # html.unescape would read "&notathing;" as "&not" plus "athing;".
+        return html.entities.html5.get(f"{code};", m.group(0))
+    return _ENTITY_CODE.sub(decode, text)
 
 
 def _strip_quotes(text: str) -> str:
@@ -367,7 +381,7 @@ class _FlowchartParser:
             sg_label = rest
 
         sg_id = _strip_quotes(sg_id)
-        sg_label = _strip_quotes(sg_label)
+        sg_label = _decode_entities(_strip_quotes(sg_label))
 
         sg = Subgraph(
             id=sg_id,
@@ -588,22 +602,6 @@ class _FlowchartParser:
             parts.append(part)
         return parts
 
-    @staticmethod
-    def _mask_quotes(text: str) -> str:
-        """Replace content inside quotes with spaces so arrow regex doesn't match inside labels."""
-        result = list(text)
-        in_quote = False
-        quote_char = ""
-        for i, ch in enumerate(result):
-            if not in_quote and ch == '"':
-                in_quote = True
-                quote_char = ch
-            elif in_quote and ch == quote_char:
-                in_quote = False
-            elif in_quote:
-                result[i] = " "
-        return "".join(result)
-
     def _split_by_arrows(self, line: str) -> list[_Segment]:
         """Split a line into alternating node and arrow segments."""
         segments: list[_Segment] = []
@@ -611,7 +609,7 @@ class _FlowchartParser:
 
         while remaining:
             # Mask quoted strings so arrows inside "..." aren't matched
-            masked = self._mask_quotes(remaining)
+            masked = _mask_quotes(remaining)
 
             # Try to find the earliest arrow match
             best_match: tuple[int, int, EdgeStyle, bool, bool, str, int, ArrowType, ArrowType] | None = None
@@ -664,7 +662,7 @@ class _FlowchartParser:
                 has_arrow_end=arr_end,
                 arrow_type_start=type_start,
                 arrow_type_end=type_end,
-                label=label,
+                label=_decode_entities(label),
                 min_length=length,
             ))
 
@@ -769,10 +767,10 @@ class _FlowchartParser:
 
         # Handle :::className suffix
         style_class: str | None = None
-        if ":::" in text:
-            text, style_class = text.rsplit(":::", 1)
-            text = text.strip()
-            style_class = style_class.strip()
+        class_idx = _mask_quotes(text).rfind(":::")
+        if class_idx >= 0:
+            style_class = text[class_idx + 3:].strip()
+            text = text[:class_idx].strip()
 
         # Try @{...} syntax: ID@{ shape: diamond, label: "text" }
         at_match = re.match(r'^([a-zA-Z_]\w*)\s*@\{(.+)\}$', text, re.DOTALL)
@@ -781,7 +779,7 @@ class _FlowchartParser:
             body = at_match.group(2)
             props = _parse_at_shape_props(body)
             shape_name = props.get("shape", "rect")
-            label = props.get("label", node_id)
+            label = _decode_entities(props.get("label", node_id))
             shape = _AT_SHAPE_MAP.get(shape_name, NodeShape.RECTANGLE)
             self._shaped_node_ids.add(node_id)
             return Node(
@@ -792,12 +790,10 @@ class _FlowchartParser:
             )
 
         # Try each shape pattern
+        masked = _mask_quotes(text)
         for open_delim, close_delim, shape in _SHAPE_PATTERNS:
-            idx = text.find(open_delim)
+            idx = masked.find(open_delim)
             if idx > 0:
-                # Skip if the delimiter is inside a quoted string
-                if _inside_quotes(text, idx):
-                    continue
                 # Check if it ends with close_delim
                 rest = text[idx + len(open_delim):]
                 if rest.endswith(close_delim):
@@ -817,7 +813,7 @@ class _FlowchartParser:
                             style_class=style_class,
                             label_segments=segments,
                         )
-                    label = _strip_quotes(raw_label)
+                    label = _decode_entities(_strip_quotes(raw_label))
                     return Node(
                         id=node_id,
                         label=label,
