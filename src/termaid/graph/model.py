@@ -184,3 +184,20 @@ class Graph:
                     return sg
             return None
         return _search(self.subgraphs)
+
+    def drop_shared_subgraph_members(self) -> None:
+        """Keep each node only in the subgraph that owns it.
+
+        A node mentioned inside two subgraphs belongs to the one that closes
+        first, as in Mermaid. Leaving it listed in both makes the boxes
+        overlap, since layering, sizing and routing would each pick a
+        different owner.
+        """
+        def _walk(subs: list[Subgraph]) -> None:
+            for sg in subs:
+                _walk(sg.children)
+                sg.node_ids = [
+                    nid for nid in sg.node_ids
+                    if self.find_subgraph_for_node(nid) is sg
+                ]
+        _walk(self.subgraphs)

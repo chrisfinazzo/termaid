@@ -1,0 +1,23 @@
+flowchart TD
+    classDef hot fill:#f66
+    subgraph Ingest
+        A[Webhook received] --> B{Signature valid?}
+        B -->|no| R[Reject 401]
+        B -->|yes| C[Parse payload]
+    end
+    subgraph Processing
+        C --> D{Event type}
+        D -->|payment| E[Settle invoice]
+        D -->|refund| F[Reverse ledger entry]
+        D -->|dispute| G[Open case]:::hot
+        E --> H[(Ledger DB)]
+        F --> H
+        G --> I[[Notify ops]]
+    end
+    subgraph Delivery
+        H --> J[Emit domain event]
+        I --> J
+        J --> K[/Publish to Kafka/]
+        K --> L([Done])
+    end
+    R --> L

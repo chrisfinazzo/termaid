@@ -197,6 +197,8 @@ def compute_layout(
     if not graph.node_order:
         return layout
 
+    graph.drop_shared_subgraph_members()
+
     # For architecture diagrams with precomputed grid positions,
     # build layer_order directly from the positions instead of BFS.
     if graph.grid_positions:

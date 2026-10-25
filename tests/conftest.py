@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -117,3 +118,29 @@ def assert_reasonable_dimensions(output: str, max_width: int = 500, max_height: 
     assert len(lines) <= max_height, f"Output has {len(lines)} lines (max {max_height})"
     max_line_width = max(len(line) for line in lines) if lines else 0
     assert max_line_width <= max_width, f"Output has lines up to {max_line_width} chars (max {max_width})"
+
+
+def find_box(lines: list[str], label: str) -> tuple[int, int, int, int]:
+    """(top, bottom, left, right) rows and columns of the box around ``label``.
+
+    The box is found from its left border, the nearest ``│`` or ``(`` left of
+    the first line that shows the label. Bottom is the first row where that
+    border character stops, so a border shared with another box reports the
+    shared row.
+    """
+    pattern = re.compile(r"[│(] +" + re.escape(label) + r"( |$)")
+    row = next(i for i, line in enumerate(lines) if pattern.search(line))
+    left = pattern.search(lines[row]).start()
+    side = lines[row][left]
+    top = row
+    while lines[top - 1][left] == side:
+        top -= 1
+    top -= 1
+    bottom = row
+    while lines[bottom + 1][left] == side:
+        bottom += 1
+    bottom += 1
+    right = left + 1
+    while lines[top][right] not in "┐┤╮╯/":
+        right += 1
+    return top, bottom, left, right

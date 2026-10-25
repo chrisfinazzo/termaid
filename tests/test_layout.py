@@ -311,3 +311,47 @@ class TestEdgeLabelWrap:
         source = f"graph LR\n  A -->|{LONG_EDGE_LABEL}| B\n"
         assert LONG_EDGE_LABEL in render(source)
         assert render(source) == render(source, max_label_width=None)
+
+
+class TestStackedSubgraphBorders:
+    """Every subgraph border gets its own row, even when the node above the
+    border and the subgraph below it are on adjacent layers."""
+
+    def test_node_border_subgraph_border_and_next_subgraph_are_distinct_rows(self):
+        from termaid import render
+        from termaid.layout.grid import SG_BORDER_PAD
+        from tests.conftest import FLOWCHARTS_DIR, find_box
+
+        lines = render((FLOWCHARTS_DIR / "subgraph_stacked_borders.mmd").read_text()).split("\n")
+        r_bottom = find_box(lines, "r")[1]
+        a_bottom = find_box(lines, "A")[1]
+        b_top = find_box(lines, "B")[0]
+        assert r_bottom + SG_BORDER_PAD == a_bottom < b_top
+
+
+class TestSubgraphWidth:
+    """A subgraph box hugs the nodes it owns, plus room for one edge corridor."""
+
+    OWNED = {
+        "Ingest": ["Webhook received", "Signature valid?", "Reject 401", "Parse payload"],
+        "Processing": [
+            "Event type", "Settle invoice", "Reverse ledger entry", "Open case",
+            "Ledger DB", "Notify ops",
+        ],
+        "Delivery": ["Emit domain event", "Publish to Kafka", "Done"],
+    }
+    CORRIDOR = 8  # one gap column beside the outermost nodes
+
+    def test_width_is_bounded_by_owned_nodes(self):
+        from termaid import render
+        from termaid.layout.grid import SG_BORDER_PAD
+        from tests.conftest import FLOWCHARTS_DIR, find_box
+
+        lines = render((FLOWCHARTS_DIR / "subgraph_pipeline.mmd").read_text()).split("\n")
+        widths = {}
+        for sg, labels in self.OWNED.items():
+            _, _, left, right = find_box(lines, sg)
+            boxes = [find_box(lines, label) for label in labels]
+            content = max(b[3] for b in boxes) - min(b[2] for b in boxes) + 1
+            widths[sg] = (right - left + 1, content + 2 * SG_BORDER_PAD + self.CORRIDOR)
+        assert all(width <= bound for width, bound in widths.values()), widths

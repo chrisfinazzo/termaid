@@ -19,6 +19,9 @@
 - Input that draws nothing (a comment-only file, text that is not a diagram) now exits with status 1 and the `render_empty` diagnostic instead of printing nothing with status 0
 - The blank between two words of a label now carries the label's style, so solid themes (`dracula`, `nord`, ...) no longer leave a differently coloured gap inside a label, and styled JSON emits one chunk per label
 
+### Fixes
+- Flowchart subgraphs: a node mentioned inside two subgraphs now belongs only to the first one that closes, as in Mermaid. The two boxes no longer overlap or share a border row, and every subgraph border gets its own row with its padding and label space
+
 ## 0.9.1 (2026-10-18)
 
 ### New
