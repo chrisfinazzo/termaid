@@ -163,6 +163,19 @@ class TestCliWrapFit:
         assert "Error: diagram exceeds 3 output rows." in err
         assert self._render(tmp_path, capsys, "--max-height", "0")[0] == 2
 
+    def test_width_wraps_flowchart_edge_labels(self, tmp_path: Path, capsys):
+        from termaid.utils import display_width
+        mmd = tmp_path / "edge.mmd"
+        mmd.write_text(
+            "graph LR\n"
+            "  A[Start] -->|customer confirms the order and pays with a stored card| B[Charge]\n"
+            "  B --> C[Ship]\n"
+        )
+        assert main([str(mmd), "--width", "50", "--strict-width"]) == 0
+        out = capsys.readouterr().out
+        assert max(display_width(line) for line in out.splitlines()) <= 50
+        assert "stored card" in out
+
     def test_checks_apply_to_whole_markdown_output(self, tmp_path: Path, capsys):
         doc = tmp_path / "doc.md"
         doc.write_text("intro\n\n```mermaid\n" + LONG_SEQUENCE + "```\n")

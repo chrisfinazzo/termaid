@@ -276,3 +276,38 @@ class TestMaxLabelWidth:
         from termaid import render
         assert render(self.SOURCE) == render(self.SOURCE, max_label_width=None)
         assert "Read complete words" in render(self.SOURCE)
+
+
+LONG_EDGE_LABEL = "customer confirms the order and pays with a stored card"
+
+
+class TestEdgeLabelWrap:
+    @pytest.mark.parametrize("direction", ["LR", "TD"])
+    def test_edge_label_wraps_into_a_block_of_whole_words(self, direction):
+        import re
+        from termaid import render
+        from termaid.utils import display_width
+        source = (
+            f"graph {direction}\n"
+            f"  A[Start] -->|{LONG_EDGE_LABEL}| B[Charge]\n"
+            "  B --> C[Ship]\n"
+        )
+        words = LONG_EDGE_LABEL.split()
+        wrapped = render(source, max_label_width=12)
+        label_rows = []
+        for row in wrapped.splitlines():
+            found = [m for m in re.finditer(r"[A-Za-z]+", row) if m.group() in words]
+            if found:
+                label_rows.append((row, found))
+        assert [m.group() for _, found in label_rows for m in found] == words
+        assert len(label_rows) <= 5
+        for row, found in label_rows:
+            assert display_width(row[found[0].start():found[-1].end()]) <= 12
+        widest = lambda text: max(display_width(line) for line in text.splitlines())
+        assert widest(wrapped) < widest(render(source))
+
+    def test_default_edge_label_unchanged(self):
+        from termaid import render
+        source = f"graph LR\n  A -->|{LONG_EDGE_LABEL}| B\n"
+        assert LONG_EDGE_LABEL in render(source)
+        assert render(source) == render(source, max_label_width=None)

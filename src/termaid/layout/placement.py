@@ -193,11 +193,18 @@ def compute_sizes(
 ) -> None:
     """Compute column widths and row heights based on node content.
 
-    Label lines wider than ``max_label_width`` (default ``MAX_LABEL_WIDTH``)
-    are wrapped at word boundaries.
+    Node label lines wider than ``max_label_width`` (default
+    ``MAX_LABEL_WIDTH``) are wrapped at word boundaries. Edge labels wrap
+    only when a width is given, into newline-joined lines.
     """
     if max_label_width is None:
         max_label_width = MAX_LABEL_WIDTH
+    else:
+        for edge in graph.edges:
+            if display_width(edge.label) > max_label_width:
+                edge.label = "\n".join(
+                    wrap_display_text(edge.label, max_label_width, hard_break=False)
+                )
     for nid, placement in layout.placements.items():
         node = graph.nodes[nid]
 
@@ -280,7 +287,8 @@ def _expand_gaps_for_edge_labels(graph: Graph, layout: GridLayout) -> None:
 
     For horizontal flow (LR): expand gap columns so labels fit on
     horizontal segments.  For vertical flow (TB): expand gap rows so
-    labels fit beside vertical segments.
+    labels fit beside vertical segments.  A wrapped label counts as a
+    block: its widest line and its line count.
     """
     direction = graph.direction.normalized()
     is_horizontal = direction.is_horizontal
@@ -288,7 +296,8 @@ def _expand_gaps_for_edge_labels(graph: Graph, layout: GridLayout) -> None:
     for edge in graph.edges:
         if not edge.label:
             continue
-        label_len = display_width(edge.label)
+        lines = edge.label.split("\n")
+        label_len = max(display_width(line) for line in lines)
 
         src_p = layout.placements.get(edge.source)
         tgt_p = layout.placements.get(edge.target)
@@ -309,6 +318,25 @@ def _expand_gaps_for_edge_labels(graph: Graph, layout: GridLayout) -> None:
             # Distribute across first gap cell (simplest approach)
             cur = layout.col_widths.get(gap_start, 4)
             layout.col_widths[gap_start] = max(cur, needed)
+            if len(lines) == 1:
+                continue
+            if src_p.grid.row != tgt_p.grid.row:
+                # A block beside the vertical run through the middle of the
+                # gap column needs its width on one side and its line count
+                # in the gap row between the lanes.
+                layout.col_widths[gap_start] = max(layout.col_widths[gap_start], 2 * label_len + 2)
+                gap_row = min(src_p.grid.row, tgt_p.grid.row) + 2
+                layout.row_heights[gap_row] = max(layout.row_heights.get(gap_row, 1), len(lines))
+            # A block above the segment needs its line count in rows: the
+            # lane's upper half and border row, then the gap row above, or
+            # the canvas top for the first lane.
+            for r in {src_p.grid.row, tgt_p.grid.row}:
+                above = layout.row_heights.get(r, 1) // 2 + 1
+                gap_row = r - 2
+                if gap_row < 0:
+                    layout.offset_y = max(layout.offset_y, len(lines) - above)
+                else:
+                    layout.row_heights[gap_row] = max(layout.row_heights.get(gap_row, 1), len(lines) - above)
         else:
             # Edges run vertically -- label placed beside the line (x+1)
             # Expand gap row for vertical space, but also ensure the gap
@@ -321,7 +349,7 @@ def _expand_gaps_for_edge_labels(graph: Graph, layout: GridLayout) -> None:
                 continue
             # Need enough vertical space: at least 2 rows for the label
             cur = layout.row_heights.get(gap_start, 3)
-            layout.row_heights[gap_start] = max(cur, 3)
+            layout.row_heights[gap_start] = max(cur, 3, len(lines))
 
             # Also ensure the gap column beside the edge is wide enough
             # for the label text. The edge typically runs in a border col;
@@ -351,9 +379,11 @@ def _expand_gaps_for_edge_labels(graph: Graph, layout: GridLayout) -> None:
     if not is_horizontal:
         from collections import Counter
         labeled_per_src: Counter[str] = Counter()
+        rows_per_src: Counter[str] = Counter()
         for edge in graph.edges:
             if edge.label:
                 labeled_per_src[edge.source] += 1
+                rows_per_src[edge.source] += edge.label.count("\n") + 2
         for src_id, count in labeled_per_src.items():
             if count < 2:
                 continue
@@ -361,6 +391,6 @@ def _expand_gaps_for_edge_labels(graph: Graph, layout: GridLayout) -> None:
             if not src_p:
                 continue
             gap_row = src_p.grid.row + 2
-            needed = count * 2 + 1  # 2 rows per label + spacing
+            needed = rows_per_src[src_id] + 1  # each label's rows + spacing
             cur = layout.row_heights.get(gap_row, 3)
             layout.row_heights[gap_row] = max(cur, needed)

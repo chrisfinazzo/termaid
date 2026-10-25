@@ -500,36 +500,48 @@ def _label_overlaps(
 
 def _place_label(
     canvas: Canvas,
-    row: int, col: int, label: str,
+    row: int, col: int, lines: list[str],
     placed: list[tuple[int, int, int]],
 ) -> bool:
-    """Place a complete label when every character can be written."""
-    col_end = col + display_width(label)
+    """Place a label block with its top-left at (row, col) when every
+    character of every line can be written."""
+    col_end = col + _block_width(lines)
     if col < 0 or row < 0:
         return False
-    for target_col in range(col, col_end):
-        if canvas.is_protected(row, target_col) and canvas.get(row, target_col) != " ":
-            return False
+    # A single line may still overwrite unprotected cells (edge lines), as
+    # it always has; a block must not land on anything.
+    strict = len(lines) > 1
+    for target_row in range(row, row + len(lines)):
+        for target_col in range(col, col_end):
+            if canvas.get(target_row, target_col) == " ":
+                continue
+            if strict or canvas.is_protected(target_row, target_col):
+                return False
     # Ensure canvas is large enough for the label
     needed_w = col_end + 1
-    needed_h = row + 1
+    needed_h = row + len(lines)
     if needed_w > canvas.width or needed_h > canvas.height:
         canvas.resize(max(canvas.width, needed_w), max(canvas.height, needed_h))
-    canvas.put_text(row, col, label, style="edge_label", overwrite_spaces=True)
-    placed.append((row, col, col_end))
+    for i, line in enumerate(lines):
+        canvas.put_text(row + i, col, line, style="edge_label", overwrite_spaces=True)
+        placed.append((row + i, col, col_end))
     return True
 
 
 def _try_place_label(
     canvas: Canvas,
-    row: int, col: int, label: str,
+    row: int, col: int, lines: list[str],
     placed: list[tuple[int, int, int]],
 ) -> bool:
-    """Try to place a non-overlapping label at (row, col)."""
-    col_end = col + display_width(label)
-    if _label_overlaps(row, col, col_end, placed):
+    """Try to place a non-overlapping label block at (row, col)."""
+    col_end = col + _block_width(lines)
+    if any(_label_overlaps(r, col, col_end, placed) for r in range(row, row + len(lines))):
         return False
-    return _place_label(canvas, row, col, label, placed)
+    return _place_label(canvas, row, col, lines, placed)
+
+
+def _block_width(lines: list[str]) -> int:
+    return max(display_width(line) for line in lines)
 
 
 def _find_last_turn(path: list[tuple[int, int]]) -> int:
@@ -556,7 +568,7 @@ def _find_last_turn(path: list[tuple[int, int]]) -> int:
 
 def _try_place_on_segment(
     canvas: Canvas, x1: int, y1: int, x2: int, y2: int,
-    label: str, placed_labels: list[tuple[int, int, int]],
+    lines: list[str], placed_labels: list[tuple[int, int, int]],
     prev_point: tuple[int, int] | None = None,
     prefer_left: bool = False,
     bias_target: bool = False,
@@ -571,7 +583,8 @@ def _try_place_on_segment(
     prefer_left: explicitly prefer the left side for vertical segments.
     bias_target: place closer to the target end (2/3) instead of midpoint.
     """
-    label_len = display_width(label)
+    label_len = _block_width(lines)
+    label_rows = len(lines)
 
     if x1 == x2 and abs(y2 - y1) >= 2:
         # Vertical segment — place beside the line.
@@ -595,11 +608,12 @@ def _try_place_on_segment(
                 prefer_left = px > x1  # came from right → prefer left
 
         if inline:
+            label = lines[0]
             right_label = f"+-{label}" if use_ascii else f"├{leader_char}{label}"
             left_label = f"{label}-+" if use_ascii else f"{label}{leader_char}┤"
             sides = [
-                (mid_y, x1, right_label),
-                (mid_y, x1 - display_width(left_label) + 1, left_label),
+                (mid_y, x1, [right_label]),
+                (mid_y, x1 - display_width(left_label) + 1, [left_label]),
             ]
             if prefer_left:
                 sides.reverse()
@@ -621,25 +635,28 @@ def _try_place_on_segment(
                         return True
             return False
 
+        # A block is centred on mid_y without starting on the segment's end
+        # row; a single line sits on mid_y.
+        top = max(lo + 1, mid_y - label_rows // 2)
         if prefer_left:
             sides = [
-                (mid_y, x1 - label_len),       # left
-                (mid_y, x1 + 1),                # right
+                (top, x1 - label_len),       # left
+                (top, x1 + 1),                # right
             ]
         else:
             sides = [
-                (mid_y, x1 + 1),                # right
-                (mid_y, x1 - label_len),        # left
+                (top, x1 + 1),                # right
+                (top, x1 - label_len),        # left
             ]
 
         for row, col in sides:
-            if _try_place_label(canvas, row, col, label, placed_labels):
+            if _try_place_label(canvas, row, col, lines, placed_labels):
                 return True
         for offset in range(1, 4):
             for row, col in sides:
-                if _try_place_label(canvas, row - offset, col, label, placed_labels):
+                if _try_place_label(canvas, row - offset, col, lines, placed_labels):
                     return True
-                if _try_place_label(canvas, row + offset, col, label, placed_labels):
+                if _try_place_label(canvas, row + offset, col, lines, placed_labels):
                     return True
         return False
 
@@ -652,11 +669,11 @@ def _try_place_on_segment(
             start = mid - label_len // 2
             if inline:
                 return _try_place_label(
-                    canvas, y1, start, label, placed_labels,
+                    canvas, y1, start, lines, placed_labels,
                 )
-            if _try_place_label(canvas, y1 - 1, start, label, placed_labels):
+            if _try_place_label(canvas, y1 - label_rows, start, lines, placed_labels):
                 return True
-            if _try_place_label(canvas, y1 + 1, start, label, placed_labels):
+            if _try_place_label(canvas, y1 + 1, start, lines, placed_labels):
                 return True
             return False
 
@@ -676,9 +693,10 @@ def _draw_edge_label(
     so labels appear on the branch, not on a shared trunk.
     Uses collision detection to avoid overlapping previously placed labels.
     """
-    label = re.label
-    if not label:
+    if not re.label:
         return
+    lines = re.label.split("\n")
+    inline = inline and len(lines) == 1
 
     path = re.draw_path
     leader_char = _edge_line_chars(
@@ -717,7 +735,7 @@ def _draw_edge_label(
         x2, y2 = path[i + 1]
         prev = path[i - 1] if i > 0 else None
         if _try_place_on_segment(
-            canvas, x1, y1, x2, y2, label, placed_labels,
+            canvas, x1, y1, x2, y2, lines, placed_labels,
             prev_point=prev,
             prefer_left=is_straight,
             bias_target=is_straight,
@@ -738,7 +756,7 @@ def _draw_edge_label(
     # Force place at midpoint of path
     mid_idx = len(path) // 2
     mx, my = path[mid_idx]
-    _place_label(canvas, my - 1, mx + 1, label, placed_labels)
+    _place_label(canvas, my - len(lines), mx + 1, lines, placed_labels)
 
 
 def _draw_notes(canvas: Canvas, graph: Graph, layout: GridLayout, cs: CharSet) -> None:
