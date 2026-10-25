@@ -179,6 +179,28 @@ class TestUnrelatedEdgesStayApart:
             "Notify ops": {"Emit domain event"},
         }
 
+    def _pipeline_lines(self) -> list[str]:
+        from termaid import render
+        from tests.conftest import FLOWCHARTS_DIR
+
+        return render((FLOWCHARTS_DIR / "subgraph_pipeline.mmd").read_text()).split("\n")
+
+    def test_edge_leaves_through_the_flow_facing_border(self):
+        from tests.conftest import find_box
+
+        lines = self._pipeline_lines()
+        top, bottom, left, right = find_box(lines, "Parse payload")
+        sides = {lines[r][left] + lines[r][right] for r in range(top + 1, bottom)}
+        assert (sides, lines[bottom][left:right + 1].count("┬")) == ({"││"}, 1)
+
+    def test_edge_enters_a_stacked_subgraph_through_its_top_border(self):
+        from tests.conftest import find_box
+
+        lines = self._pipeline_lines()
+        top, bottom, left, right = find_box(lines, "Delivery")
+        side_crossings = sum(lines[r][c] == "┼" for r in range(top, bottom + 1) for c in (left, right))
+        assert (lines[top].count("┼"), side_crossings) == (3, 0)
+
     def test_edges_without_subgraphs_reach_only_their_targets(self):
         reached = self._targets("unrelated_edges.mmd", ["A", "B", "C", "D", "E"])
         assert {name: reached[name] for name in "ABC"} == {

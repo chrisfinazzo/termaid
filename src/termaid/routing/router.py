@@ -37,7 +37,8 @@ class RoutedEdge:
     index: int = 0
     # Grid cells occupied by this edge's path
     occupied_cells: set[tuple[int, int]] = field(default_factory=set)
-    # Cells where this route runs into an unrelated edge's line
+    # Cells where the preferred route would share an unrelated edge's line
+    # if lines were only soft obstacles
     crowded: set[tuple[int, int]] = field(default_factory=set)
 
 
@@ -54,8 +55,8 @@ def layout_and_route(
 ) -> tuple[GridLayout, list[RoutedEdge]]:
     """Lay out the graph and route its edges.
 
-    A layer gap where a route runs into an unrelated edge's line gets one
-    more grid cell, as long as that leaves fewer such routes.
+    A layer gap holding a crowded cell gets one more grid cell, as long as
+    that leaves fewer crowded routes.
     """
     extra: dict[int, int] = {}
     layout = compute_layout(graph, padding_x, padding_y, gap, max_label_width)
@@ -788,7 +789,7 @@ def _route_edge(
 
     The route keeps off ``blocked`` cells and passes ``crossings`` only
     perpendicularly. When neither attachment allows that, it takes the
-    path through the fewest such cells, and those become ``crowded``.
+    path through the fewest such cells.
     """
     preferred, alt = _determine_directions(src, tgt, direction)
 
@@ -820,6 +821,17 @@ def _route_edge(
 
     path_alt = search(start_alt, end_alt, strict=True)
 
+    # The preferred route as it would be if other lines were only soft
+    # obstacles. Where it shares one, the gap there has no room to spare.
+    ideal = find_path(
+        *start_pref, *end_pref, layout.is_free,
+        soft_obstacles | blocked | crossings.keys(), penalty=penalty,
+    )
+    crowded = {
+        cell for cell, horizontal in (_path_axes(ideal) if ideal else {}).items()
+        if cell in blocked or (cell in crossings and horizontal in (None, crossings[cell]))
+    }
+
     if path_pref is None and path_alt is None:
         path_pref = search(start_pref, end_pref, strict=False)
         path_alt = search(start_alt, end_alt, strict=False)
@@ -850,10 +862,6 @@ def _route_edge(
 
     # Track occupied cells
     occupied = set(path)
-    crowded = {
-        cell for cell, horizontal in _path_axes(path).items()
-        if cell in blocked or (cell in crossings and horizontal in (None, crossings[cell]))
-    }
 
     return RoutedEdge(
         edge=edge,

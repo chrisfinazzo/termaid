@@ -71,13 +71,17 @@ def expand_gaps_for_subgraphs(
             # Gap cells between the two node rows/columns
             gap_start = pos1 + 2
             gap_end = pos2 - 2
-            for gap in range(gap_start, gap_end + 1):
+            # The borders sit at the ends of the gap, so with several cells
+            # the first one keeps room below the upper border and the last
+            # one room above the lower border and its label.
+            sizes = {gap_start: extra // 2 + 1, gap_end: extra}
+            for gap, size in sizes.items():
                 if is_vertical:
                     cur = layout.row_heights.get(gap, 1)
-                    layout.row_heights[gap] = max(cur, extra)
+                    layout.row_heights[gap] = max(cur, size)
                 else:
                     cur = layout.col_widths.get(gap, 2)
-                    layout.col_widths[gap] = max(cur, extra)
+                    layout.col_widths[gap] = max(cur, size)
 
     # --- Expand cross-direction gaps (sibling subgraphs) ---
     for i in range(len(sorted_cross) - 1):

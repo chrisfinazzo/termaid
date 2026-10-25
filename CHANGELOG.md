@@ -22,7 +22,7 @@
 ### Fixes
 - Flowchart subgraphs: a node mentioned inside two subgraphs now belongs only to the first one that closes, as in Mermaid. The two boxes no longer overlap or share a border row, and every subgraph border gets its own row with its padding and label space
 - Flowchart subgraphs: an edge from a node in one subgraph to a node in the subgraph below now leaves through the bottom border and enters through the top border, going around sibling nodes inside the box instead of running down outside it. A box widens over the gap column beside its nodes only when one of its own edges runs there
-- Flowcharts: two edges with neither a source nor a target in common no longer run along the same line or meet at a T junction, so a line no longer appears to lead to a node it does not reach. Such edges may still cross. When an edge has no clean route between two layers, that gap grows by one row (one column in LR diagrams)
+- Flowcharts: two edges with neither a source nor a target in common no longer run along the same line or meet at a T junction, so a line no longer appears to lead to a node it does not reach. Such edges may still cross. Where an edge would otherwise have to share a line between two layers, that gap grows by one row (one column in LR diagrams), so it keeps its usual sides instead of leaving or arriving sideways
 - Cylinder nodes (`[(DB)]`, sequence `database` participants): the second row is now the front rim of the lid, drawn inside the sides (`│╰──╯│`, `|\__/|` in ASCII), so the top no longer reads as a flat box stacked on another box
 
 ## 0.9.1 (2026-10-18)
