@@ -1,0 +1,11 @@
+gantt
+    title Release day
+    dateFormat YYYY-MM-DD HH:mm
+    axisFormat %H:%M
+    section Build
+        Compile        :done, c1, 2024-03-05 08:00, 1.5h
+        Test suite     :done, c2, after c1, 45m
+    section Rollout
+        Canary         :active, r1, after c2, 2h
+        Full rollout   :crit, r2, after r1, 3h
+        Verified       :milestone, r3, after r2, 0m

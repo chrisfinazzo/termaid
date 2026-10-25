@@ -1,0 +1,14 @@
+gantt
+    title Release 2.0
+    dateFormat YYYY-MM-DD
+    section Research
+        Interviews      :done, r1, 2024-03-01, 10d
+        Synthesis       :done, r2, after r1, 5d
+    section Build
+        Backend         :active, b1, 2024-03-11, 3w
+        Frontend        :crit, b2, 2024-03-16, 2024-04-05
+        Integration     :b3, after b1 b2, 7d
+        QA              :5d
+    section Launch
+        Code freeze     :milestone, m1, after b3, 0d
+        Rollout         :l1, after m1, 4d

@@ -4,29 +4,51 @@ Syntax:
     gantt
         title Project Plan
         dateFormat YYYY-MM-DD
+        axisFormat %b %d
         section Design
             Wireframes     :done, des1, 2024-01-01, 2024-01-14
             Prototypes     :active, des2, 2024-01-08, 2024-01-21
         section Development
             Frontend       :dev1, after des2, 30d
             Backend        :crit, dev2, 2024-01-15, 2024-03-01
+
+Dates keep their time of day, so a chart can span years or milliseconds.
+``dateFormat x`` (Unix milliseconds) and ``dateFormat X`` (Unix seconds)
+are read as UTC and stored as naive datetimes, so the output never depends
+on the machine's timezone.
 """
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 
-from ..model.gantt import Gantt, GanttSection, GanttTask
+from ..model.gantt import Duration, Gantt, GanttSection, GanttTask, TickInterval
 
-# Mermaid (dayjs) date format tokens -> strptime directives
+# Mermaid (dayjs) date format tokens -> strptime directives. SSS maps to %f,
+# which right-pads three digits to microseconds.
 _FORMAT_TOKENS = {
     "YYYY": "%Y", "YY": "%y",
     "MM": "%m", "M": "%m",
     "DD": "%d", "D": "%d",
-    "HH": "%H", "H": "%H",
-    "mm": "%M", "ss": "%S",
+    "HH": "%H", "H": "%H", "hh": "%I", "h": "%I",
+    "mm": "%M", "m": "%M",
+    "ss": "%S", "s": "%S",
+    "SSS": "%f",
+    "A": "%p", "a": "%p",
 }
 _FORMAT_TOKEN_RE = re.compile("|".join(sorted(_FORMAT_TOKENS, key=len, reverse=True)))
+_EPOCH = datetime(1970, 1, 1)
+
+# Mermaid's grammar is ^(\d+(?:\.\d+)?)(ms|[Mdhmswy])$; the long spellings
+# are kept from earlier termaid versions.
+_DURATION_RE = re.compile(r"^(\d+(?:\.\d+)?)\s*(ms|[Mdhmswy]|days?|weeks?|months?)$")
+_DURATION_UNITS = {
+    "ms": "millisecond", "s": "second", "m": "minute", "h": "hour",
+    "d": "day", "w": "week", "M": "month", "y": "year",
+    "day": "day", "days": "day", "week": "week", "weeks": "week",
+    "month": "month", "months": "month",
+}
+_TICK_INTERVAL_RE = re.compile(r"^([1-9][0-9]*)(millisecond|second|minute|hour|day|week|month)$")
 
 
 def parse_gantt(text: str) -> Gantt:
@@ -59,8 +81,18 @@ def parse_gantt(text: str) -> Gantt:
             gantt.date_format = stripped[11:].strip()
             continue
 
-        if lower.startswith("axisformat ") or lower.startswith("excludes ") or lower.startswith("tickinterval ") or lower.startswith("weekend "):
-            continue  # skip formatting directives
+        if lower.startswith("axisformat "):
+            gantt.axis_format = stripped[11:].strip()
+            continue
+
+        if lower.startswith("tickinterval "):
+            m = _TICK_INTERVAL_RE.match(stripped[13:].strip())
+            if m:
+                gantt.tick_interval = TickInterval(int(m.group(1)), m.group(2))
+            continue
+
+        if lower.startswith("excludes ") or lower.startswith("weekend "):
+            continue  # exclusions are not applied
 
         if lower.startswith("todaymarker "):
             if "off" in lower:
@@ -81,7 +113,7 @@ def parse_gantt(text: str) -> Gantt:
 
         # Task line: "Title :tags, id, start, end/duration"
         if ":" in stripped:
-            task = _parse_task(stripped, tasks_by_id, gantt.date_format)
+            task = _parse_task(stripped, gantt.date_format)
             if task:
                 if current_section is None:
                     current_section = GanttSection(title="")
@@ -91,9 +123,7 @@ def parse_gantt(text: str) -> Gantt:
                 if task.start is None and not task.after and current_section.tasks:
                     prev = current_section.tasks[-1]
                     if prev.end:
-                        task.start = prev.end
-                        if task.end is None and hasattr(task, '_duration_days'):
-                            task.end = task.start + timedelta(days=task._duration_days)
+                        task.start_at(prev.end)
 
                 current_section.tasks.append(task)
                 if task.id:
@@ -104,30 +134,21 @@ def parse_gantt(text: str) -> Gantt:
         changed = False
         for section in gantt.sections:
             for task in section.tasks:
-                if task.after and task.start is None:
-                    # Multiple IDs: "after task1 task2" - use latest end date
-                    after_ids = task.after.split()
-                    latest_end: date | None = None
-                    all_resolved = True
-                    for aid in after_ids:
-                        dep = tasks_by_id.get(aid)
-                        if dep and dep.end:
-                            if latest_end is None or dep.end > latest_end:
-                                latest_end = dep.end
-                        else:
-                            all_resolved = False
-                    if all_resolved and latest_end:
-                        task.start = latest_end
-                        if task.end is None and hasattr(task, '_duration_days'):
-                            task.end = task.start + timedelta(days=task._duration_days)
-                        changed = True
+                if not task.after or task.start is not None:
+                    continue
+                # Multiple IDs: "after task1 task2" - start at the latest end
+                deps = [tasks_by_id.get(aid) for aid in task.after.split()]
+                ends = [dep.end for dep in deps if dep is not None and dep.end is not None]
+                if len(ends) == len(deps):
+                    task.start_at(max(ends))
+                    changed = True
         if not changed:
             break
 
     return gantt
 
 
-def _parse_task(line: str, tasks_by_id: dict[str, GanttTask], date_format: str) -> GanttTask | None:
+def _parse_task(line: str, date_format: str) -> GanttTask | None:
     """Parse a task line like 'Title :done, id1, 2024-01-01, 2024-01-14'."""
     colon_idx = line.find(":")
     if colon_idx < 0:
@@ -156,29 +177,25 @@ def _parse_task(line: str, tasks_by_id: dict[str, GanttTask], date_format: str) 
             remaining.append(part)
 
     # Parse remaining: [id], [start|after X], [end|duration]
-    for i, part in enumerate(remaining):
-        low = part.lower()
-
-        if low.startswith("after "):
+    for part in remaining:
+        if part.lower().startswith("after "):
             # Support multiple: "after task1 task2" - store all IDs
             task.after = part[6:].strip()
             continue
 
-        # Try as duration (e.g., "30d", "2w")
-        dur = _parse_duration(part)
-        if dur is not None:
-            task._duration_days = dur  # type: ignore[attr-defined]
-            if task.start:
-                task.end = task.start + timedelta(days=dur)
-            continue
-
-        # Try as date
         d = _parse_date(part, date_format)
         if d:
-            if task.start is None:
+            if task.start is None and not task.after:
                 task.start = d
             else:
                 task.end = d
+            continue
+
+        dur = _parse_duration(part)
+        if dur is not None:
+            task.duration = dur
+            if task.start:
+                task.end = dur.end_from(task.start)
             continue
 
         # Must be an ID
@@ -192,45 +209,42 @@ def _parse_task(line: str, tasks_by_id: dict[str, GanttTask], date_format: str) 
     return task
 
 
-def _parse_date(text: str, date_format: str) -> date | None:
+def _parse_date(text: str, date_format: str) -> datetime | None:
     """Parse a date string, honoring the diagram's dateFormat directive."""
     text = text.strip()
-    # Try the declared dateFormat first (Mermaid/dayjs tokens)
-    if date_format:
-        fmt = _FORMAT_TOKEN_RE.sub(lambda m: _FORMAT_TOKENS[m.group(0)], date_format)
+    fmt = date_format.strip()
+    if fmt in ("x", "X"):
         try:
-            return datetime.strptime(text, fmt).date()
+            value = float(text)
+        except ValueError:
+            return None
+        return _EPOCH + (timedelta(milliseconds=value) if fmt == "x" else timedelta(seconds=value))
+    # Try the declared dateFormat first (Mermaid/dayjs tokens)
+    if fmt:
+        try:
+            return datetime.strptime(text, _FORMAT_TOKEN_RE.sub(lambda m: _FORMAT_TOKENS[m.group(0)], fmt))
         except ValueError:
             pass
     # Try ISO format
     m = re.match(r'^(\d{4})-(\d{1,2})-(\d{1,2})$', text)
     if m:
         try:
-            return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)))
         except ValueError:
             return None
     # Try MM/DD/YYYY
     m = re.match(r'^(\d{1,2})/(\d{1,2})/(\d{4})$', text)
     if m:
         try:
-            return date(int(m.group(3)), int(m.group(1)), int(m.group(2)))
+            return datetime(int(m.group(3)), int(m.group(1)), int(m.group(2)))
         except ValueError:
             return None
     return None
 
 
-def _parse_duration(text: str) -> int | None:
-    """Parse a duration like '30d', '2w', '3m'."""
-    text = text.strip().lower()
-    m = re.match(r'^(\d+)\s*(d|day|days|w|week|weeks|m|month|months)$', text)
+def _parse_duration(text: str) -> Duration | None:
+    """Parse a duration like '30d', '2w', '1.5h', '406ms'; units are case-sensitive."""
+    m = _DURATION_RE.match(text.strip())
     if not m:
         return None
-    val = int(m.group(1))
-    unit = m.group(2)[0]
-    if unit == 'd':
-        return val
-    elif unit == 'w':
-        return val * 7
-    elif unit == 'm':
-        return val * 30
-    return None
+    return Duration(float(m.group(1)), _DURATION_UNITS[m.group(2)])

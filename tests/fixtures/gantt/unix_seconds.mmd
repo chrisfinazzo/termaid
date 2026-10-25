@@ -1,0 +1,10 @@
+gantt
+    title Incident timeline
+    dateFormat X
+    axisFormat %H:%M
+    section Detection
+        Alert fired    :crit, a1, 1729850000, 10m
+        Paged on-call  :milestone, a2, 1729850300, 0s
+    section Response
+        Triage         :active, t1, after a2, 25m
+        Rollback       :done, t2, after t1, 900s

@@ -10,6 +10,7 @@
 - `--format styled-json` prints the diagram as one JSON document of text chunks tagged with style keys (`node`, `edge`, `class:<name>`, ...), for editors and tools that colour the output themselves. `termaid.render_styled()` returns the same document
 - `--diagnostics-format json` prints each error and warning on stderr as a versioned JSON line with a stable `code`, argument errors included
 - Python API: `render()` and `render_rich()` take `max_label_width` to wrap labels in flowcharts and sequence diagrams
+- Gantt charts at any time scale: dates keep their time of day, `dateFormat` accepts the dayjs tokens `HH:mm:ss`, `SSS`, `x` (Unix milliseconds) and `X` (Unix seconds, both read as UTC), durations take Mermaid's units `ms`, `s`, `m`, `h`, `d`, `w`, `M`, `y` with decimals (`1.5h`), `axisFormat` labels the axis with d3 directives including `%L`, and `tickInterval` places ticks every N units
 - The styled output, the JSON diagnostics, the wrap-mode fitting and the two strict flags come from @BeckWlim's proposal and fork in #11, ported to the current layout code
 
 ### Behavior changes
@@ -17,6 +18,7 @@
 - `render_rich()` honours `padding_x`, `padding_y`, `gap` and `rounded_edges` for architecture, journey, mindmap and packet diagrams the way `render()` does, so coloured and plain output have the same layout
 - `termaid --demo` with an unknown type now prefixes its message with `Error:` like every other error
 - Input that draws nothing (a comment-only file, text that is not a diagram) now exits with status 1 and the `render_empty` diagnostic instead of printing nothing with status 0
+- Gantt durations follow Mermaid's case-sensitive units: `3m` is now 3 minutes (it was 90 days) and `3M` is 3 calendar months; `30D` is no longer a duration. The long spellings `days`, `weeks` and `months` still work
 - The blank between two words of a label now carries the label's style, so solid themes (`dracula`, `nord`, ...) no longer leave a differently coloured gap inside a label, and styled JSON emits one chunk per label
 
 ### Fixes
@@ -24,6 +26,10 @@
 - Flowchart subgraphs: an edge from a node in one subgraph to a node in the subgraph below now leaves through the bottom border and enters through the top border, going around sibling nodes inside the box instead of running down outside it. A box widens over the gap column beside its nodes only when one of its own edges runs there
 - Flowcharts: two edges with neither a source nor a target in common no longer run along the same line or meet at a T junction, so a line no longer appears to lead to a node it does not reach. Such edges may still cross. Where an edge would otherwise have to share a line between two layers, that gap grows by one row (one column in LR diagrams), so it keeps its usual sides instead of leaving or arriving sideways
 - Cylinder nodes (`[(DB)]`, sequence `database` participants): the second row is now the front rim of the lid, drawn inside the sides (`│╰──╯│`, `|\__/|` in ASCII), so the top no longer reads as a flat box stacked on another box
+- Gantt: a task written as `after x, 2024-04-05` ends on that date instead of starting on it, so the tasks chained after it get their bars
+- Flowchart: `%%` inside a quoted label is label text, not the start of a comment, so `A["50%% off"] --> B` keeps its edge
+- Flowchart: `:::` inside a quoted label no longer assigns a class, so `A["a:::b"]` keeps its whole label
+- Flowchart: entity codes in node labels, edge labels and subgraph titles are decoded, as in Mermaid (`#quot;`, `#amp;`, `#lt;` and other HTML names, decimal codes such as `#9829;`)
 
 ## 0.9.1 (2026-10-18)
 

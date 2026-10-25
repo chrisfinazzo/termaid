@@ -134,7 +134,7 @@ graph TD
 
 **Subgraphs:** nesting, cross-boundary edges, per-subgraph `direction` override
 
-**Other:** `%%` comments, `;` line separators, Markdown labels `` "`**bold** *italic*`" ``, `&` operator (`A & B --> C`)
+**Other:** `%%` comments, `;` line separators, Markdown labels `` "`**bold** *italic*`" ``, `&` operator (`A & B --> C`), entity codes (`#quot;`, `#amp;`, `#9829;`)
 
 ### Sequence diagrams
 
@@ -340,6 +340,37 @@ gitGraph
 **Commit types:** `NORMAL` (●), `REVERSE` (✖), `HIGHLIGHT` (■)
 
 **Config:** `%%{init: {"gitGraph": {"mainBranchName": "master"}}}%%`
+
+### Gantt charts
+
+```mermaid
+gantt
+    title Project Plan
+    dateFormat YYYY-MM-DD
+    section Design
+        Wireframes     :done, des1, 2024-01-01, 2024-01-14
+        Prototypes     :active, des2, 2024-01-08, 2024-01-21
+    section Development
+        Frontend       :dev1, after des2, 30d
+        Backend        :crit, dev2, 2024-01-15, 2024-03-01
+```
+
+```
+                                          Project Plan
+
+ Design          │
+   Wireframes    │░░░░░░░░░░░░░
+   Prototypes    │       ▓▓▓▓▓▓▓▓▓▓▓▓▓
+ Development     │
+   Frontend      │                    ██████████████████████████████
+   Backend       │              ███████████████████████████████████████████████
+                 └┬─────────┬─────────┬─────────┬─────────┬─────────┬─────────┬
+               Jan 01    Jan 11    Jan 21    Jan 31    Feb 10    Feb 20    Mar 01
+```
+
+**Tasks:** `done`, `active`, `crit`, `milestone` tags, `after id` dependencies, durations in Mermaid's units (`30d`, `2w`, `3M`, `1.5h`, `45m`, `1.2s`, `406ms`)
+
+**Time scales:** any span from years to milliseconds. `dateFormat YYYY-MM-DD HH:mm` keeps the time of day, `dateFormat x` and `X` read Unix milliseconds and seconds, `axisFormat %H:%M` (or `%S.%L`) labels the axis, and `tickInterval 6hour` places the ticks
 
 ### Pie charts
 

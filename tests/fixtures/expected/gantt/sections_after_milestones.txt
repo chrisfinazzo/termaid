@@ -1,0 +1,15 @@
+                                         Release 2.0
+
+ Research      │
+   Interviews  │░░░░░░░░░░░░░
+   Synthesis   │             ░░░░░░░
+ Build         │
+   Backend     │             ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
+   Frontend    │                    ███████████████████████████
+   Integration │                                               ██████████
+   QA          │
+ Launch        │
+   Code freeze │                                                         ◆
+   Rollout     │                                                         ██████
+               └┬─────────┬─────────┬──────────┬─────────┬─────────┬──────────┬
+             Mar 01    Mar 08    Mar 16     Mar 24    Mar 31    Apr 08     Apr 16

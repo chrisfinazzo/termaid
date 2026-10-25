@@ -1,0 +1,9 @@
+gantt
+    dateFormat x
+    axisFormat %S.%L
+    section agent
+    plan       :done, p1, 1729850000000, 406ms
+    search     :s1, 1729850000410, 1.2s
+    fetch page :crit, f1, 1729850000420, 900ms
+    answer     :after s1, 300ms
+    done       :milestone, m1, 1729850001920, 0ms
