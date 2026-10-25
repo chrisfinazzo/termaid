@@ -1,25 +1,25 @@
 # Changelog
 
-## Unreleased
+## 0.10.0 (2026-10-25)
 
 ### New
 - Claude Code integration: `termaid --claude-hook` runs as a `MessageDisplay` hook and draws the mermaid blocks in Claude's replies in place while they stream, holding a fence that spans batches until it closes. The repo doubles as a plugin marketplace (`/plugin install termaid --marketplace fasouto/termaid`) that installs the hook and a `/termaid:mermaid` skill
-- Wrap-mode fitting: when `--width` cannot fit a diagram by tightening spacing alone, labels now wrap at word boundaries (sequence participants, messages, notes and frame titles; flowchart node and edge labels) and the widest wrap that fits is kept. Output is unchanged whenever the diagram already fits
+- Wrap-mode fitting: when `--width` cannot fit a diagram by tightening spacing alone, labels now wrap at word boundaries (sequence participants, messages, notes and frame titles; flowchart node and edge labels) and termaid keeps the widest wrap that fits. A diagram that already fits renders exactly as before
 - `--strict-width`: exit with status 2 instead of a warning when the output is still wider than `--width`
 - `--max-height ROWS`: exit with status 2 when the output has more lines than `ROWS`
-- `--format styled-json` prints the diagram as one JSON document of text chunks tagged with style keys (`node`, `edge`, `class:<name>`, ...), for editors and tools that colour the output themselves. `termaid.render_styled()` returns the same document
+- `--format styled-json` prints the diagram as one JSON document of text chunks tagged with style keys (`node`, `edge`, `class:<name>`, ...), for editors and tools that color the output themselves. `termaid.render_styled()` returns the same document
 - `--diagnostics-format json` prints each error and warning on stderr as a versioned JSON line with a stable `code`, argument errors included
 - Python API: `render()` and `render_rich()` take `max_label_width` to wrap labels in flowcharts and sequence diagrams
 - Gantt charts at any time scale: dates keep their time of day, `dateFormat` accepts the dayjs tokens `HH:mm:ss`, `SSS`, `x` (Unix milliseconds) and `X` (Unix seconds, both read as UTC), durations take Mermaid's units `ms`, `s`, `m`, `h`, `d`, `w`, `M`, `y` with decimals (`1.5h`), `axisFormat` labels the axis with d3 directives including `%L`, and `tickInterval` places ticks every N units
 - The styled output, the JSON diagnostics, the wrap-mode fitting and the two strict flags come from @BeckWlim's proposal and fork in #11, ported to the current layout code
 
 ### Behavior changes
-- `--width` must be positive; `--width 0` now exits with status 2 instead of being accepted
-- `render_rich()` honours `padding_x`, `padding_y`, `gap` and `rounded_edges` for architecture, journey, mindmap and packet diagrams the way `render()` does, so coloured and plain output have the same layout
+- `--width` must be positive. `--width 0` now exits with status 2 instead of being accepted
+- `render_rich()` honors `padding_x`, `padding_y`, `gap` and `rounded_edges` for architecture, journey, mindmap and packet diagrams the way `render()` does, so colored and plain output have the same layout
 - `termaid --demo` with an unknown type now prefixes its message with `Error:` like every other error
 - Input that draws nothing (a comment-only file, text that is not a diagram) now exits with status 1 and the `render_empty` diagnostic instead of printing nothing with status 0
-- Gantt durations follow Mermaid's case-sensitive units: `3m` is now 3 minutes (it was 90 days) and `3M` is 3 calendar months; `30D` is no longer a duration. The long spellings `days`, `weeks` and `months` still work
-- The blank between two words of a label now carries the label's style, so solid themes (`dracula`, `nord`, ...) no longer leave a differently coloured gap inside a label, and styled JSON emits one chunk per label
+- Gantt durations follow Mermaid's case-sensitive units: `3m` is now 3 minutes (it was 90 days) and `3M` is 3 calendar months. `30D` is no longer a duration. The long spellings `days`, `weeks` and `months` still work
+- The blank between two words of a label now carries the label's style, so solid themes (`dracula`, `nord`, ...) no longer leave a differently colored gap inside a label, and styled JSON emits one chunk per label
 
 ### Fixes
 - Flowchart subgraphs: a node mentioned inside two subgraphs now belongs only to the first one that closes, as in Mermaid. The two boxes no longer overlap or share a border row, and every subgraph border gets its own row with its padding and label space

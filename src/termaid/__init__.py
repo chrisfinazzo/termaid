@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from .renderer.canvas import Canvas
 
 
-__version__ = "0.9.1"
+__version__ = "0.10.0"
 
 _FRONTMATTER_RE = re.compile(r"^---\s*\n.*?\n---\s*\n", re.DOTALL)
 
