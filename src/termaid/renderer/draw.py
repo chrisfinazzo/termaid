@@ -14,8 +14,8 @@ from __future__ import annotations
 
 from ..graph.model import ArrowType, Direction, EdgeStyle, Graph, GraphNote
 from ..graph.shapes import NodeShape
-from ..layout.grid import GridLayout, NodePlacement, compute_layout
-from ..routing.router import AttachDir, RoutedEdge, route_edges
+from ..layout.grid import GridLayout, NodePlacement
+from ..routing.router import AttachDir, RoutedEdge, layout_and_route
 from .canvas import Canvas
 from ..utils import display_width
 from .charset import ASCII, UNICODE, CharSet
@@ -87,11 +87,7 @@ def render_graph_canvas(
     elif needs_h_flip:
         graph.direction = Direction.LR
 
-    # Layout
-    layout = compute_layout(graph, padding_x, padding_y, gap, max_label_width)
-
-    # Route edges
-    routed = route_edges(graph, layout)
+    layout, routed = layout_and_route(graph, padding_x, padding_y, gap, max_label_width)
 
     # Create canvas (add some margin)
     # Account for edge paths that may extend beyond node boundaries

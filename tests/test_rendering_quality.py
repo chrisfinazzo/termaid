@@ -135,7 +135,7 @@ class TestMissingEdges:
         """
         src = 'graph TD\n  A-->|left|C\n  B-->|right|D\n  A-->D\n  B-->C'
         out = render(src)
-        arrow_count = out.count("▼") + out.count("►")
+        arrow_count = sum(out.count(arrow) for arrow in "▼►◄▲")
         assert arrow_count >= 4, (
             f"Expected 4 arrows for 4 edges, found {arrow_count}:\n{out}"
         )

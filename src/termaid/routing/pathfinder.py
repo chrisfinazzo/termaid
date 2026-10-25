@@ -2,7 +2,8 @@
 
 Uses Manhattan distance with +1 corner penalty as heuristic.
 4-directional movement only (no diagonals).
-Previously-routed edges are soft obstacles (cost +2).
+Previously-routed edges are soft obstacles (cost +2). A crossing cell holds
+an unrelated edge's straight line: a path may only pass it perpendicularly.
 """
 from __future__ import annotations
 
@@ -42,6 +43,7 @@ def find_path(
     soft_obstacles: set[tuple[int, int]] | None = None,
     max_iterations: int = 5000,
     penalty: Callable[[int, int], float] | None = None,
+    crossings: dict[tuple[int, int], bool] | None = None,
 ) -> list[tuple[int, int]] | None:
     """Find a path from start to end using A*.
 
@@ -52,6 +54,8 @@ def find_path(
         soft_obstacles: Set of cells occupied by previously-routed edges (cost +2)
         max_iterations: Maximum iterations before giving up
         penalty: Extra cost of stepping onto a cell, on top of soft obstacles
+        crossings: Cells a path may only cross straight through, mapped to
+            True when the line already there runs horizontally
 
     Returns:
         List of (col, row) waypoints, or None if no path found
@@ -60,6 +64,7 @@ def find_path(
         return [(start_col, start_row)]
 
     soft = soft_obstacles or set()
+    cross = crossings or {}
 
     start_node = _AStarNode(
         f_cost=heuristic(start_col, start_row, end_col, end_row),
@@ -69,8 +74,10 @@ def find_path(
     )
 
     open_set: list[_AStarNode] = [start_node]
-    closed: set[tuple[int, int]] = set()
-    best_g: dict[tuple[int, int], float] = {(start_col, start_row): 0}
+    # A crossing cell is a separate state per heading, since a path that
+    # enters it cannot turn there.
+    closed: set[tuple[int, ...]] = set()
+    best_g: dict[tuple[int, ...], float] = {(start_col, start_row): 0}
 
     iterations = 0
     while open_set and iterations < max_iterations:
@@ -80,7 +87,12 @@ def find_path(
         if current.col == end_col and current.row == end_row:
             return _reconstruct(current)
 
-        key = (current.col, current.row)
+        heading = None
+        if current.parent is not None:
+            heading = (current.col - current.parent.col, current.row - current.parent.row)
+        key: tuple[int, ...] = (current.col, current.row)
+        if key in cross and heading is not None:
+            key += heading
         if key in closed:
             continue
         closed.add(key)
@@ -88,8 +100,15 @@ def find_path(
         for dc, dr in DIRS:
             nc, nr = current.col + dc, current.row + dr
             nkey = (nc, nr)
+            state: tuple[int, ...] = nkey
+            if nkey in cross:
+                if (dc == 0) != cross[nkey]:
+                    continue
+                state += (dc, dr)
+            if (current.col, current.row) in cross and heading not in (None, (dc, dr)):
+                continue
 
-            if nkey in closed:
+            if state in closed:
                 continue
 
             # Allow start and end even if "occupied"
@@ -105,17 +124,14 @@ def find_path(
                 step_cost += penalty(nc, nr)
 
             # Corner penalty: if direction changes from parent's direction
-            if current.parent is not None:
-                prev_dc = current.col - current.parent.col
-                prev_dr = current.row - current.parent.row
-                if (dc, dr) != (prev_dc, prev_dr):
-                    step_cost += 0.5  # slight corner penalty in g-cost too
+            if heading is not None and (dc, dr) != heading:
+                step_cost += 0.5  # slight corner penalty in g-cost too
 
             new_g = current.g_cost + step_cost
 
-            if nkey in best_g and best_g[nkey] <= new_g:
+            if state in best_g and best_g[state] <= new_g:
                 continue
-            best_g[nkey] = new_g
+            best_g[state] = new_g
 
             h = heuristic(nc, nr, end_col, end_row)
             neighbor = _AStarNode(

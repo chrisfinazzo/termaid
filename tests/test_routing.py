@@ -55,6 +55,13 @@ class TestPathfinder:
         assert path == [(0, 0), (1, 0)]
 
 
+    def test_crossing_cell_is_passed_straight(self):
+        line = {(c, 2): True for c in range(5)}
+        path = find_path(0, 0, 4, 4, lambda c, r: True, crossings=line)
+        i = next(i for i, (_, r) in enumerate(path) if r == 2)
+        assert path[i - 1][0] == path[i][0] == path[i + 1][0]
+
+
 class TestSimplifyPath:
     def test_already_simple(self):
         assert simplify_path([(0, 0), (5, 0)]) == [(0, 0), (5, 0)]
@@ -141,6 +148,52 @@ class TestEdgeRouting:
         paths = [tuple(re.grid_path) for re in routed]
         # Not all paths should be identical
         assert len(set(paths)) > 1
+
+
+class TestUnrelatedEdgesStayApart:
+    """Edges with no common endpoint may cross but never share a run or a T
+    junction, so each line leads only to its own targets."""
+
+    PIPELINE_NODES = [
+        "Webhook received", "Signature valid?", "Reject 401", "Parse payload",
+        "Event type", "Settle invoice", "Reverse ledger entry", "Open case",
+        "Notify ops", "Emit domain event", "Publish to Kafka", "Done",
+    ]
+
+    def _targets(self, fixture: str, labels: list[str]) -> dict[str, set[str]]:
+        from termaid import render
+        from tests.conftest import FLOWCHARTS_DIR, edge_targets
+
+        lines = render((FLOWCHARTS_DIR / fixture).read_text()).split("\n")
+        return {label: edge_targets(lines, label, labels) for label in labels}
+
+    def test_pipeline_edges_reach_only_their_targets(self):
+        reached = self._targets("subgraph_pipeline.mmd", self.PIPELINE_NODES)
+        assert {
+            "Reject 401": reached["Reject 401"],
+            "Parse payload": reached["Parse payload"],
+            "Notify ops": reached["Notify ops"],
+        } == {
+            "Reject 401": {"Done"},
+            "Parse payload": {"Event type"},
+            "Notify ops": {"Emit domain event"},
+        }
+
+    def test_edges_without_subgraphs_reach_only_their_targets(self):
+        reached = self._targets("unrelated_edges.mmd", ["A", "B", "C", "D", "E"])
+        assert {name: reached[name] for name in "ABC"} == {
+            "A": {"E"},
+            "B": {"E"},
+            "C": {"D", "E"},
+        }
+
+    def test_gap_grows_when_no_clean_route_fits(self):
+        reached = self._targets("unrelated_edges_gap.mmd", ["A", "B", "C", "D", "E"])
+        assert {name: reached[name] for name in "ABC"} == {
+            "A": {"B", "C", "D"},
+            "B": {"D", "E"},
+            "C": {"E"},
+        }
 
 
 class TestSubgraphEdgeRouting:

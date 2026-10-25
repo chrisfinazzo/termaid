@@ -124,23 +124,84 @@ def find_box(lines: list[str], label: str) -> tuple[int, int, int, int]:
     """(top, bottom, left, right) rows and columns of the box around ``label``.
 
     The box is found from its left border, the nearest ``│`` or ``(`` left of
-    the first line that shows the label. Bottom is the first row where that
-    border character stops, so a border shared with another box reports the
-    shared row.
+    the first line that shows the label, or ``┤`` where an edge leaves that
+    side. Bottom is the first row where that border stops, so a border shared
+    with another box reports the shared row.
     """
-    pattern = re.compile(r"[│(] +" + re.escape(label) + r"( |$)")
+    pattern = re.compile(r"[│┤(] +" + re.escape(label) + r"( |$)")
     row = next(i for i, line in enumerate(lines) if pattern.search(line))
     left = pattern.search(lines[row]).start()
-    side = lines[row][left]
+    side = "(" if lines[row][left] == "(" else "│┤"
     top = row
-    while lines[top - 1][left] == side:
+    while lines[top - 1][left] in side:
         top -= 1
     top -= 1
     bottom = row
-    while lines[bottom + 1][left] == side:
+    while lines[bottom + 1][left] in side:
         bottom += 1
     bottom += 1
     right = left + 1
     while lines[top][right] not in "┐┤╮╯/":
         right += 1
     return top, bottom, left, right
+
+
+_LINKS = {
+    "│": "UD", "─": "LR", "┌": "DR", "╭": "DR", "┐": "DL", "╮": "DL",
+    "└": "UR", "╰": "UR", "┘": "UL", "╯": "UL",
+    "├": "UDR", "┤": "UDL", "┬": "LRD", "┴": "LRU", "┼": "UDLR",
+}
+_ARROWS = {"▼": "D", "▲": "U", "►": "R", "◄": "L"}
+_STEP = {"U": (-1, 0), "D": (1, 0), "L": (0, -1), "R": (0, 1)}
+_BACK = {"U": "D", "D": "U", "L": "R", "R": "L"}
+
+
+def edge_targets(lines: list[str], label: str, labels: list[str]) -> set[str]:
+    """Labels of the boxes that the lines leaving ``label``'s box point into.
+
+    Follows box-drawing connectors outward from every side of the box, goes
+    straight through ``┼`` crossings, and records the box an arrowhead points
+    at. ``labels`` are the node boxes to look for, located with ``find_box``.
+    """
+    boxes = {name: find_box(lines, name) for name in labels}
+
+    def box_at(row: int, col: int) -> str | None:
+        for name, (top, bottom, left, right) in boxes.items():
+            if top <= row <= bottom and left <= col <= right:
+                return name
+        return None
+
+    def char(row: int, col: int) -> str:
+        if 0 <= row < len(lines) and 0 <= col < len(lines[row]):
+            return lines[row][col]
+        return " "
+
+    top, bottom, left, right = boxes[label]
+    todo = [(top - 1, c, "U") for c in range(left, right + 1)]
+    todo += [(bottom + 1, c, "D") for c in range(left, right + 1)]
+    todo += [(r, left - 1, "L") for r in range(top, bottom + 1)]
+    todo += [(r, right + 1, "R") for r in range(top, bottom + 1)]
+    todo = [(r, c, d) for r, c, d in todo if _BACK[d] in _LINKS.get(char(r, c), "")]
+    seen: set[tuple[int, int, str]] = set()
+    reached: set[str] = set()
+    while todo:
+        row, col, heading = todo.pop()
+        if (row, col, heading) in seen:
+            continue
+        seen.add((row, col, heading))
+        ch = char(row, col)
+        if ch in _ARROWS:
+            dr, dc = _STEP[_ARROWS[ch]]
+            hit = box_at(row + dr, col + dc)
+            if hit:
+                reached.add(hit)
+            continue
+        links = _LINKS.get(ch, "")
+        if _BACK[heading] not in links:
+            continue
+        outs = heading if ch == "┼" else [d for d in links if d != _BACK[heading]]
+        for d in outs:
+            dr, dc = _STEP[d]
+            if box_at(row + dr, col + dc) is None:
+                todo.append((row + dr, col + dc, d))
+    return reached

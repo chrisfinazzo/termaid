@@ -10,7 +10,9 @@ from enum import Enum, auto
 from typing import Callable
 
 from ..graph.model import Direction, Edge, Graph
-from ..layout.grid import SG_BORDER_PAD, GridLayout, NodePlacement, SubgraphBounds
+from ..layout.grid import (
+    SG_BORDER_PAD, GridLayout, NodePlacement, SubgraphBounds, compute_layout,
+)
 from .pathfinder import find_path, simplify_path
 
 
@@ -35,13 +37,62 @@ class RoutedEdge:
     index: int = 0
     # Grid cells occupied by this edge's path
     occupied_cells: set[tuple[int, int]] = field(default_factory=set)
+    # Cells where this route runs into an unrelated edge's line
+    crowded: set[tuple[int, int]] = field(default_factory=set)
+
+
+_MAX_GAP_ROUNDS = 3
+_CROWDING_COST = 10.0
+
+
+def layout_and_route(
+    graph: Graph,
+    padding_x: int,
+    padding_y: int,
+    gap: int,
+    max_label_width: int | None,
+) -> tuple[GridLayout, list[RoutedEdge]]:
+    """Lay out the graph and route its edges.
+
+    A layer gap where a route runs into an unrelated edge's line gets one
+    more grid cell, as long as that leaves fewer such routes.
+    """
+    extra: dict[int, int] = {}
+    layout = compute_layout(graph, padding_x, padding_y, gap, max_label_width)
+    routed = route_edges(graph, layout)
+    for _ in range(_MAX_GAP_ROUNDS):
+        crowded = _crowded_gaps(routed, layout, graph.direction.normalized())
+        if not crowded:
+            break
+        grown = {g: extra.get(g, 0) + (g in crowded) for g in extra.keys() | crowded}
+        next_layout = compute_layout(graph, padding_x, padding_y, gap, max_label_width, grown)
+        next_routed = route_edges(graph, next_layout)
+        if sum(bool(r.crowded) for r in next_routed) >= sum(bool(r.crowded) for r in routed):
+            break
+        extra, layout, routed = grown, next_layout, next_routed
+    return layout, routed
+
+
+def _crowded_gaps(
+    routed: list[RoutedEdge], layout: GridLayout, direction: Direction,
+) -> set[int]:
+    """Indexes of the layer gaps that hold a crowded cell."""
+    coords = layout.layer_coords
+    gaps: set[int] = set()
+    for re in routed:
+        for col, row in re.crowded:
+            flow = row if direction.is_vertical else col
+            gaps.update(
+                i for i in range(len(coords) - 1)
+                if coords[i] + 1 < flow < coords[i + 1] - 1
+            )
+    return gaps
 
 
 def route_edges(graph: Graph, layout: GridLayout) -> list[RoutedEdge]:
     """Route all edges in the graph."""
     direction = graph.direction.normalized()
     routed: list[RoutedEdge] = []
-    soft_obstacles: set[tuple[int, int]] = set()
 
     # Build subgraph bounds lookup
     sg_bounds: dict[str, SubgraphBounds] = {}
@@ -53,8 +104,16 @@ def route_edges(graph: Graph, layout: GridLayout) -> list[RoutedEdge]:
     sg_regions = _compute_sg_regions(layout, sg_bounds)
     facing_homes: list[tuple[RoutedEdge, set[str]]] = []
 
+    endpoints = [_resolve_endpoints(edge, layout, sg_bounds) for edge in graph.edges]
+    places = [_endpoint_places(edge, graph) for edge in graph.edges]
+    ends = {
+        i: _end_cells(src, tgt, direction)
+        for i, (src, tgt) in enumerate(endpoints)
+        if src is not None and tgt is not None and not graph.edges[i].is_self_reference
+    }
+
     for i, edge in enumerate(graph.edges):
-        src, tgt = _resolve_endpoints(edge, layout, sg_bounds)
+        src, tgt = endpoints[i]
 
         if src is None or tgt is None:
             continue
@@ -67,12 +126,17 @@ def route_edges(graph: Graph, layout: GridLayout) -> list[RoutedEdge]:
 
         forbidden = _foreign_sg_cells(edge, graph, sg_regions)
         facing = _flow_facing_homes(edge, graph, src, tgt, sg_regions, direction)
+        penalty = _side_exit_penalty(facing, sg_regions, direction)
+        shared, crossings, blocked = _occupancy(
+            [(r, _related(places[i], places[r.index])) for r in routed],
+            [ends[j] for j in range(i + 1, len(graph.edges))
+             if j in ends and not _related(places[i], places[j])],
+        )
         re = _route_edge(
-            edge, src, tgt, layout, direction, soft_obstacles | forbidden,
-            _side_exit_penalty(facing, sg_regions, direction),
+            edge, src, tgt, layout, direction, shared | forbidden, penalty,
+            crossings, blocked,
         )
         re.index = i
-        soft_obstacles.update(re.occupied_cells)
         routed.append(re)
         facing_homes.append((re, facing))
 
@@ -95,6 +159,105 @@ def route_edges(graph: Graph, layout: GridLayout) -> list[RoutedEdge]:
     _spread_shared_endpoints(routed, layout, sg_bounds)
 
     return routed
+
+
+_Places = tuple[frozenset[str], frozenset[str]]
+
+
+def _endpoint_places(edge: Edge, graph: Graph) -> _Places:
+    """The ids each end of an edge stands on. A subgraph end stands on its
+    members too, since it is routed from one of their cells."""
+    def place(endpoint: str, is_sg: bool) -> frozenset[str]:
+        ids = {endpoint}
+        stack = [graph.find_subgraph_by_id(endpoint)] if is_sg else []
+        while stack:
+            sg = stack.pop()
+            if sg:
+                ids.update(sg.node_ids)
+                stack.extend(sg.children)
+        return frozenset(ids)
+
+    return (
+        place(edge.source, edge.source_is_subgraph),
+        place(edge.target, edge.target_is_subgraph),
+    )
+
+
+def _related(a: _Places, b: _Places) -> bool:
+    """Edges that may share cells: a fan-out trunk, a fan-in trunk, or the
+    two directions of one link."""
+    (a_src, a_tgt), (b_src, b_tgt) = a, b
+    return bool(a_src & b_src or a_tgt & b_tgt or (a_src & b_tgt and a_tgt & b_src))
+
+
+def _end_cells(
+    src: NodePlacement, tgt: NodePlacement, direction: Direction,
+) -> list[tuple[tuple[int, int], bool]]:
+    """The cells just outside an edge's preferred attachment points, each
+    with whether the edge runs horizontally there."""
+    (s_dir, t_dir), _ = _determine_directions(src, tgt, direction)
+    cells = []
+    for placement, attach in ((src, s_dir), (tgt, t_dir)):
+        c, r = _get_attach_point(placement, attach)
+        dc, dr = c - placement.grid.col, r - placement.grid.row
+        cells.append(((c + dc, r + dr), dr == 0))
+    return cells
+
+
+def _occupancy(
+    routed: list[tuple[RoutedEdge, bool]],
+    pending_ends: list[list[tuple[tuple[int, int], bool]]],
+) -> tuple[set[tuple[int, int]], dict[tuple[int, int], bool], set[tuple[int, int]]]:
+    """Split the cells routed edges hold into what the next edge may share
+    (those related to it), what it may only cross, and what it must avoid.
+
+    An unrelated edge's straight run can be crossed; its corners and ends
+    cannot. The cells where unrouted unrelated edges will leave or reach
+    their nodes are held the same way, so this edge does not turn in them.
+    """
+    shared: set[tuple[int, int]] = set()
+    crossings: dict[tuple[int, int], bool] = {}
+    blocked: set[tuple[int, int]] = set()
+
+    def hold(cell: tuple[int, int], horizontal: bool | None) -> None:
+        if horizontal is None or crossings.get(cell, horizontal) != horizontal:
+            blocked.add(cell)
+        else:
+            crossings[cell] = horizontal
+
+    for other, related in routed:
+        if related:
+            shared.update(other.occupied_cells)
+            continue
+        for cell, horizontal in _cell_axes(other).items():
+            hold(cell, horizontal)
+    for ends in pending_ends:
+        for cell, horizontal in ends:
+            hold(cell, horizontal)
+    for cell in blocked:
+        crossings.pop(cell, None)
+    return shared, crossings, blocked
+
+
+def _cell_axes(re: RoutedEdge) -> dict[tuple[int, int], bool | None]:
+    if re.edge.is_self_reference:
+        return {cell: None for cell in re.occupied_cells}
+    return _path_axes(re.grid_path)
+
+
+def _path_axes(path: list[tuple[int, int]]) -> dict[tuple[int, int], bool | None]:
+    """Each cell of a path: True where it runs straight horizontally, False
+    straight vertically, None at its ends and corners."""
+    cells = [path[0]]
+    for (c0, r0), (c1, r1) in zip(path, path[1:]):
+        dc, dr = (c1 > c0) - (c1 < c0), (r1 > r0) - (r1 < r0)
+        while cells[-1] != (c1, r1):
+            cells.append((cells[-1][0] + dc, cells[-1][1] + dr))
+    axes: dict[tuple[int, int], bool | None] = {cells[0]: None, cells[-1]: None}
+    for prev, cell, nxt in zip(cells, cells[1:], cells[2:]):
+        straight = cell[0] - prev[0] == nxt[0] - cell[0] and cell[1] - prev[1] == nxt[1] - cell[1]
+        axes[cell] = (prev[1] == cell[1]) if straight else None
+    return axes
 
 
 def _spread_shared_endpoints(
@@ -617,9 +780,16 @@ def _route_edge(
     layout: GridLayout,
     direction: Direction,
     soft_obstacles: set[tuple[int, int]],
-    penalty: Callable[[int, int], float] | None = None,
+    penalty: Callable[[int, int], float] | None,
+    crossings: dict[tuple[int, int], bool],
+    blocked: set[tuple[int, int]],
 ) -> RoutedEdge:
-    """Route a single edge between two nodes."""
+    """Route a single edge between two nodes.
+
+    The route keeps off ``blocked`` cells and passes ``crossings`` only
+    perpendicularly. When neither attachment allows that, it takes the
+    path through the fewest such cells, and those become ``crowded``.
+    """
     preferred, alt = _determine_directions(src, tgt, direction)
 
     # Try preferred path
@@ -628,25 +798,31 @@ def _route_edge(
     start_pref = _get_attach_point(src, preferred[0])
     end_pref = _get_attach_point(tgt, preferred[1])
 
-    path_pref = find_path(
-        start_pref[0], start_pref[1],
-        end_pref[0], end_pref[1],
-        lambda c, r: layout.is_free(c, r),
-        soft_obstacles,
-        penalty=penalty,
-    )
+    def clear(c: int, r: int) -> bool:
+        return layout.is_free(c, r) and (c, r) not in blocked
+
+    def crowding(c: int, r: int) -> float:
+        held = (c, r) in blocked or (c, r) in crossings
+        return (penalty(c, r) if penalty else 0.0) + _CROWDING_COST * held
+
+    def search(start: tuple[int, int], end: tuple[int, int], strict: bool):
+        if strict:
+            return find_path(
+                *start, *end, clear, soft_obstacles, penalty=penalty, crossings=crossings,
+            )
+        return find_path(*start, *end, layout.is_free, soft_obstacles, penalty=crowding)
+
+    path_pref = search(start_pref, end_pref, strict=True)
 
     # Try alternative path
     start_alt = _get_attach_point(src, alt[0])
     end_alt = _get_attach_point(tgt, alt[1])
 
-    path_alt = find_path(
-        start_alt[0], start_alt[1],
-        end_alt[0], end_alt[1],
-        lambda c, r: layout.is_free(c, r),
-        soft_obstacles,
-        penalty=penalty,
-    )
+    path_alt = search(start_alt, end_alt, strict=True)
+
+    if path_pref is None and path_alt is None:
+        path_pref = search(start_pref, end_pref, strict=False)
+        path_alt = search(start_alt, end_alt, strict=False)
 
     # Pick path: prefer the flow-aligned direction unless the alternative
     # is significantly shorter.  A small bias keeps edges exiting in the
@@ -674,6 +850,10 @@ def _route_edge(
 
     # Track occupied cells
     occupied = set(path)
+    crowded = {
+        cell for cell, horizontal in _path_axes(path).items()
+        if cell in blocked or (cell in crossings and horizontal in (None, crossings[cell]))
+    }
 
     return RoutedEdge(
         edge=edge,
@@ -683,6 +863,7 @@ def _route_edge(
         end_dir=end_dir,
         label=edge.label,
         occupied_cells=occupied,
+        crowded=crowded,
     )
 
 

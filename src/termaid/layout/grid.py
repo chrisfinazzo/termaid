@@ -99,6 +99,8 @@ class GridLayout:
     subgraph_bounds: list[SubgraphBounds] = field(default_factory=list)
     offset_x: int = 0
     offset_y: int = 0
+    # Grid coordinate of each layer along the flow axis
+    layer_coords: list[int] = field(default_factory=list)
 
     def is_free(self, col: int, row: int, exclude: set[str] | None = None) -> bool:
         """Check if a grid cell is not occupied by any node's 3x3 block."""
@@ -176,8 +178,13 @@ def compute_layout(
     padding_y: int = 2,
     gap: int = 4,
     max_label_width: int | None = None,
+    extra_gaps: dict[int, int] | None = None,
 ) -> GridLayout:
-    """Compute the grid layout for a graph."""
+    """Compute the grid layout for a graph.
+
+    ``extra_gaps`` adds grid cells between layers, by gap index, on top of
+    the ones crossing edges get.
+    """
     gap = max(gap, 1)  # minimum 1 for arrow visibility
     # Lazy imports to avoid circular references at module load time
     from .layers import (
@@ -224,6 +231,9 @@ def compute_layout(
 
         # Step 2b: Compute extra gap cells for crossing edges
         gap_expansions = compute_gap_expansions(graph, layer_order)
+
+    for gap_idx, extra in (extra_gaps or {}).items():
+        gap_expansions[gap_idx] = gap_expansions.get(gap_idx, 0) + extra
 
     # Step 3: Place nodes on the grid (with expanded gaps for crossings)
     place_nodes(graph, layout, layer_order, direction, gap_expansions)

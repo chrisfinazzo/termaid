@@ -106,14 +106,15 @@ def place_nodes(
     for layer_idx, nodes in enumerate(layer_order):
         if layer_idx > 0:
             cumulative_extra += expansions.get(layer_idx - 1, 0)
+        layout.layer_coords.append(layer_idx * STRIDE + 1 + cumulative_extra)
         for nid in nodes:
             pos_idx = slots[nid]
             if direction.is_horizontal:
-                col = layer_idx * STRIDE + 1 + cumulative_extra
+                col = layout.layer_coords[-1]
                 row = pos_idx * STRIDE + 1
             else:
                 col = pos_idx * STRIDE + 1
-                row = layer_idx * STRIDE + 1 + cumulative_extra
+                row = layout.layer_coords[-1]
 
             gc = GridCoord(col=col, row=row)
 
