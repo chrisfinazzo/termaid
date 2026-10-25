@@ -409,6 +409,8 @@ def main(argv: list[str] | None = None) -> int:
             result = _render_markdown(source, args, render_fn, use_color)
         else:
             result = _render_one(source, args, render_fn, target_width=args.width)
+            if not _plain(result).strip():
+                return _report(args, "render_empty", "Input produced no renderable diagram.")
 
         failed = _check_output(_plain(result), args)
         if failed is not None:

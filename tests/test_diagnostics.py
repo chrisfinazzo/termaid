@@ -17,6 +17,22 @@ def _boom(*args, **kwargs):
     raise RuntimeError("internal failure")
 
 
+@pytest.mark.parametrize("source", ["not a diagram\n", "%% only a comment\n"])
+def test_input_that_draws_nothing_is_render_empty(tmp_path: Path, capsys, source: str):
+    path = tmp_path / "nothing.mmd"
+    path.write_text(source, encoding="utf-8")
+    assert main([str(path)]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "Error: Input produced no renderable diagram.\n"
+    assert main([str(path), "--diagnostics-format", "json", "--format", "styled-json"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    diagnostic = _single(captured.err)
+    assert diagnostic["code"] == "render_empty"
+    assert diagnostic["exit_code"] == 1
+
+
 def _json_lines(err: str) -> list[dict]:
     return [json.loads(line) for line in err.splitlines()]
 

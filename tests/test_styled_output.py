@@ -60,6 +60,21 @@ def test_unrenderable_input_is_an_empty_document():
     assert render_styled("graph TD") == {"version": 1, "lines": []}
 
 
+def test_label_with_spaces_is_one_chunk():
+    doc = render_styled("graph LR\n  A[Hello big world]")
+    labels = [chunk for line in doc["lines"] for chunk in line if chunk["style"] == "label"]
+    assert labels == [{"text": "Hello big world", "style": "label"}]
+
+
+def test_blank_cells_carry_no_foreground_style():
+    source = "sequenceDiagram\n  A->>B: hi\n  par Fetch data\n    A->>B: go\n  end"
+    doc = render_styled(source)
+    blanks = [chunk for line in doc["lines"] for chunk in line if not chunk["text"].strip()]
+    assert blanks and all(chunk["style"] == "default" for chunk in blanks)
+    titles = [chunk["text"] for line in doc["lines"] for chunk in line if chunk["text"].startswith("[par]")]
+    assert titles == ["[par] Fetch data"]
+
+
 def test_class_def_nodes_keep_their_class_key():
     doc = render_styled((FIXTURES_DIR / "flowcharts" / "showcase_class_shorthand.mmd").read_text())
     assert {"class:highlight", "class:error"} <= _styles(doc)

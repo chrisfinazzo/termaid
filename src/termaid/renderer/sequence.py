@@ -718,7 +718,7 @@ def _clear_frame_row(canvas: Canvas, row: int, frame_bounds: tuple[int, int], cs
     left, right = frame_bounds
     canvas.put(row, left, cs.vertical, merge=False, style="node")
     for c in range(left + 1, min(right, canvas.width)):
-        canvas._grid[row][c] = " "
+        canvas.blank(row, c)
     if right < canvas.width:
         canvas.put(row, right, cs.vertical, merge=False, style="node")
 

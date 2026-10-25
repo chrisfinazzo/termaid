@@ -16,6 +16,8 @@
 - `--width` must be positive; `--width 0` now exits with status 2 instead of being accepted
 - `render_rich()` honours `padding_x`, `padding_y`, `gap` and `rounded_edges` for architecture, journey, mindmap and packet diagrams the way `render()` does, so coloured and plain output have the same layout
 - `termaid --demo` with an unknown type now prefixes its message with `Error:` like every other error
+- Input that draws nothing (a comment-only file, text that is not a diagram) now exits with status 1 and the `render_empty` diagnostic instead of printing nothing with status 0
+- The blank between two words of a label now carries the label's style, so solid themes (`dracula`, `nord`, ...) no longer leave a differently coloured gap inside a label, and styled JSON emits one chunk per label
 
 ## 0.9.1 (2026-10-18)
 

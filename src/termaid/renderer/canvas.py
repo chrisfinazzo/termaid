@@ -219,6 +219,8 @@ class Canvas:
                 self._grid[row][target_col] = " "
                 self._directions[row][target_col] = 0
                 self._style_grid[row][target_col] = style or "default"
+            elif ch == " ":
+                self._style_blank(row, target_col, style)
             else:
                 self.put(row, target_col, ch, merge=False, style=style)
             if unicodedata.east_asian_width(ch) in ("F", "W"):
@@ -239,6 +241,19 @@ class Canvas:
                     offset += 2
                 else:
                     offset += 1
+
+    def _style_blank(self, row: int, col: int, style: str) -> None:
+        """Give a blank cell inside a text run the run's style, so a label
+        reads as one styled span instead of one chunk per word."""
+        if style and 0 <= row < self.height and 0 <= col < self.width and self._grid[row][col] == " ":
+            self._style_grid[row][col] = style
+
+    def blank(self, row: int, col: int) -> None:
+        """Reset a cell to an unstyled space."""
+        if 0 <= row < self.height and 0 <= col < self.width:
+            self._grid[row][col] = " "
+            self._directions[row][col] = 0
+            self._style_grid[row][col] = "default"
 
     def _blank_shadow_cell(self, row: int, col: int, style: str) -> None:
         """Blank the cell after a wide char, only when both the wide char's
