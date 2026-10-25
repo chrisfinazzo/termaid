@@ -14,7 +14,7 @@ uv sync --all-extras
 uv run pytest tests/ -q
 ```
 
-To update snapshot tests after changing rendering output:
+If you change rendering on purpose, regenerate the snapshots and read the diff before you commit:
 
 ```bash
 uv run pytest tests/ --update-snapshots
@@ -24,37 +24,40 @@ uv run pytest tests/ --update-snapshots
 
 ```
 src/termaid/
-  __init__.py          # Public API: render(), render_rich(), parse()
+  __init__.py          # Public API: render(), render_rich(), render_styled(), parse()
   cli.py               # CLI entry point (argparse)
   graph/               # Graph data model (Node, Edge, Subgraph, NodeShape)
-  model/               # Diagram-specific models (sequence, class, ER, block, gitgraph)
+  model/               # Models for the non-flowchart types (sequence, class, ER, gantt, ...)
   parser/              # Mermaid syntax parsers (one per diagram type)
   layout/              # Grid-based layout computation (flowcharts)
   routing/             # A* edge routing (flowcharts)
   renderer/            # Canvas rendering, shapes, charsets, themes
-  output/              # Output formats (text, rich, textual widget)
+  output/              # Rich colors, styled JSON, Textual widget
+  diagnostics.py       # Errors and warnings as text or JSON
+  claude_hook.py       # termaid --claude-hook for Claude Code
 tests/
-  fixtures/flowcharts/ # .mmd input fixtures + expected .txt outputs
+  fixtures/flowcharts/ # Flowchart .mmd inputs; expected .txt in fixtures/expected/
+  fixtures/<type>/     # Other types; expected .txt in fixtures/expected/<type>/
 ```
 
 ### Architecture
 
 There are two rendering paths:
 
-**Path A — Flowcharts and state diagrams** use the shared `Graph` model with the grid layout engine and A* edge routing (`layout/` + `routing/` + `renderer/draw.py`).
+**Flowcharts, state diagrams and architecture diagrams** share the `Graph` model, the grid layout engine in `layout/`, A* edge routing in `routing/`, and `renderer/draw.py`.
 
-**Path B — All other diagram types** (sequence, class, ER, block, git graph) have their own model (`model/`), parser (`parser/`), and renderer (`renderer/`) that draw directly onto a `Canvas`.
+**Every other diagram type** has its own model in `model/`, parser in `parser/` and renderer in `renderer/`, which draws directly onto a `Canvas`.
 
 ### Diagram dispatch
 
-Both `render()` and `render_rich()` auto-detect the diagram type from the source text prefix (e.g. `sequenceDiagram`, `classDiagram`, `gitGraph`) and dispatch to the appropriate parser + renderer.
+`_render_canvas()` in `src/termaid/__init__.py` reads the first keyword of the source (`sequenceDiagram`, `classDiagram`, `gitGraph`, and so on), runs the matching parser and renderer, and returns the `Canvas`. `render()`, `render_rich()` and `render_styled()` all call it.
 
 ## Adding a new diagram type
 
 1. Create the model in `src/termaid/model/yourdiagram.py` (dataclasses)
 2. Create the parser in `src/termaid/parser/yourdiagram.py`
 3. Create the renderer in `src/termaid/renderer/yourdiagram.py` (returns a `Canvas`)
-4. Add dispatch in `src/termaid/__init__.py` (both `render()` and `render_rich()`)
+4. Add a branch for its keyword in `_render_canvas()` in `src/termaid/__init__.py`
 5. Add tests
 
 ## Adding a new node shape
@@ -67,7 +70,7 @@ Both `render()` and `render_rich()` auto-detect the diagram type from the source
 
 ## Adding a test fixture
 
-1. Create `tests/fixtures/flowcharts/my_test.mmd`
-2. Run `uv run pytest tests/test_renderer.py -q` — it auto-generates the expected output
-3. Review the generated `.txt` file in `tests/fixtures/expected/`
-4. Run again to confirm it passes
+1. Create `tests/fixtures/flowcharts/my_test.mmd`, or `tests/fixtures/<type>/my_test.mmd` for another diagram type
+2. Run `uv run pytest tests/ -q`. The first run writes the missing expected file
+3. Read the new `.txt` file under `tests/fixtures/expected/` and check the drawing is right
+4. Run the tests again to confirm they pass

@@ -10,19 +10,19 @@
 
 ## Features
 
-- **18 diagram types:** flowcharts, sequence, class, ER, state, block, git, gantt, architecture, pie, treemap, mindmap, timeline, kanban, quadrant, XY chart, user journey, and packet
-- **Zero dependencies:** pure Python, nothing to install beyond the package itself
-- **Terminal-aware:** auto-fits diagrams to terminal width with progressive compaction
-- **Rich and Textual integration:** colored output and TUI widgets with optional extras
-- **6 color themes:** default, terra, neon, mono, amber, phosphor
-- **ASCII fallback:** works on any terminal, even the most basic ones
-- **Pipe-friendly CLI:** `cat diagram.mmd | termaid` just works
+- 18 diagram types: flowcharts, sequence, class, ER, state, block, git, gantt, architecture, pie, treemap, mindmap, timeline, kanban, quadrant, XY chart, user journey, and packet
+- No dependencies. The core is pure Python
+- Fits the terminal width: it tightens spacing first, then wraps labels at word boundaries
+- Colored output with Rich and a TUI widget for Textual, as optional extras, with 11 themes
+- `--ascii` for terminals without box-drawing characters
+- Reads from a file or stdin: `cat diagram.mmd | termaid`
+- Draws the Mermaid blocks in a Markdown file, or in Claude Code's replies, in place
 
 ## Why?
 
-Mermaid is great for documentation, but rendering it usually means spinning up a browser or calling an external service. termaid lets you render diagrams over SSH, in CI logs, inside TUI apps, or anywhere you have a Python environment. It was built because the existing tools in this space, like [mermaid-ascii](https://github.com/AlexanderGrooff/mermaid-ascii) (Go) and [beautiful-mermaid](https://github.com/lukilabs/beautiful-mermaid) (TypeScript), don't offer a native Python library you can import and call directly.
+Mermaid is great for documentation, but rendering it usually means spinning up a browser or calling an external service. termaid lets you render diagrams over SSH, in CI logs, inside TUI apps, or anywhere you have a Python environment. I built it because the existing tools in this space, like [mermaid-ascii](https://github.com/AlexanderGrooff/mermaid-ascii) (Go) and [beautiful-mermaid](https://github.com/lukilabs/beautiful-mermaid) (TypeScript), don't offer a native Python library you can import and call directly.
 
-## Install it using your package manager:
+## Install
 
 ### Pip
 
@@ -440,7 +440,7 @@ Project ──├─ Development ──╭─ Frontend
 
 **Features:** indentation-based nesting, automatic overflow to the left when many children, rounded/sharp/ASCII branch characters, Mermaid shape markers stripped (`(round)`, `[square]`, `{{hexagon}}`, `)cloud(`)
 
-### XY Charts
+### XY charts
 
 ```mermaid
 xychart-beta
@@ -473,7 +473,7 @@ xychart-beta
 
 **Features:** bar charts, line charts, bar+line combos, horizontal orientation (`xychart horizontal`), axis labels, `xychart` and `xychart-beta` keywords, rounded/sharp line corners, JSON ingest
 
-### User Journeys
+### User journeys
 
 ```mermaid
 journey
@@ -503,7 +503,7 @@ journey
 
 **Features:** sections, satisfaction scores (😞-😄), multi-actor support with distinct symbols (●◆■▲), rounded/sharp/ASCII corners
 
-### Packet Diagrams
+### Packet diagrams
 
 ```mermaid
 packet
@@ -629,8 +629,8 @@ and then `/plugin install termaid@termaid`. The plugin needs the `termaid` comma
 your PATH (`brew install termaid` or `uv tool install termaid`). It adds:
 
 - a `MessageDisplay` hook that runs `termaid --claude-hook` on each reply and draws its
-  mermaid blocks in place. It is display-only: the transcript is untouched, and if termaid
-  is missing or fails, the original text is shown.
+  mermaid blocks in place. It only changes what you see. The transcript keeps the source,
+  and if termaid is missing or fails, Claude Code shows the original text.
 - a `/termaid:mermaid` skill for explicit requests, such as rendering a file or the
   diagrams in a PR description.
 
@@ -669,12 +669,12 @@ diagram line:
 ```
 
 Joining the chunk texts of each line gives exactly the text output, fitted to
-`--width` the same way. The tool picks the colours. Style keys name the role of
+`--width` the same way. The tool picks the colors. Style keys name the role of
 the cells (`node`, `edge`, `arrow`, `label`, `edge_label`, `subgraph`,
-`section:N`, and so on), and flowcharts also carry `class:<name>`,
-`nodestyle:<id>` and `linkstyle:<index>`, so the diagram's own `classDef`,
-`style` and `linkStyle` colours can be applied. `--theme` is ignored, and
-`--tui`, `--markdown` and `--claude-hook` cannot be combined with it.
+`section:N`, and so on). Flowcharts also carry `class:<name>`,
+`nodestyle:<id>` and `linkstyle:<index>`, so a tool can apply the diagram's own
+`classDef`, `style` and `linkStyle` colors. termaid ignores `--theme` here and
+rejects `--tui`, `--markdown` and `--claude-hook` together with this format.
 
 `--diagnostics-format json` prints each error and warning on stderr as one JSON
 line, with a stable `code` to branch on:
@@ -688,12 +688,12 @@ Codes: `input_missing`, `input_empty`, `invalid_arguments`,
 `input_conversion_failed`, `dependency_missing`, `render_failed`,
 `render_empty`, `output_write_failed`, `width_exceeded`, `height_exceeded`.
 With `--width` alone, `width_exceeded` is a warning with status 0 and the
-actual and target widths in `details`; with `--strict-width` it is an error.
+actual and target widths in `details`. With `--strict-width` it is an error.
 
 ## Limitations
 
 - **Layout engine is approximate.** Node positioning uses a grid-based barycenter heuristic. Very dense graphs may still produce some edge crossings.
-- **Manhattan-only edge routing.** Edges use A* pathfinding on a grid. The engine auto-expands gaps for crossing edges and biases toward flow-aligned routes.
+- **Grid edge routing.** Edges are horizontal and vertical segments found by A* search on a grid. Two edges share a line only when they share a node. Otherwise they cross, and the gap between layers grows to keep them apart, which can leave tall empty gaps in dense diagrams.
 - **Wide diagrams.** The CLI auto-compacts when the diagram exceeds terminal width, and wraps labels at word boundaries when spacing alone cannot fit it. For very wide LR chains, use `--width N`, `--gap 1`, or pipe through `less -S`.
 
 ## Gallery

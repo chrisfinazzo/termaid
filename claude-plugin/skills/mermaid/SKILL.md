@@ -18,6 +18,8 @@ stay aligned.
 If termaid is not installed, tell the user: `brew install termaid` or
 `uv tool install termaid`.
 
-When the user wants to check a diagram, run termaid on it: a parse error is
-reported on stderr with a non-zero exit, and a successful render is the
-check. Do not paraphrase the drawing; paste it verbatim.
+To check a diagram, run termaid on it. termaid exits non-zero and prints the
+reason on stderr when it cannot draw anything. It parses leniently, so a
+drawing does not prove the source is valid Mermaid. Compare the drawing with
+the nodes and edges the user meant. Paste the drawing verbatim. Do not
+describe it in words.
